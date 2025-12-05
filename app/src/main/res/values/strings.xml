@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">unNCM</string>
+    <string name="input_folder_label">Input Folder</string>
+    <string name="output_folder_label">Output Folder</string>
+    <string name="scan_button">Scan</string>
+    <string name="convert_button">Convert All</string>
+    <string name="no_files_found">No pending .ncm files found.</string>
+    <string name="permission_rationale">Storage permission is needed to scan files.</string>
+    <string name="grant_permission">Grant</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_converting">Converting...</string>
+    <string name="status_done">Done</string>
+</resources>
