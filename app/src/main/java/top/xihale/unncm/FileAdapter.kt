@@ -1,6 +1,7 @@
 package top.xihale.unncm
 
 import android.graphics.Color
+import android.net.Uri
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.documentfile.provider.DocumentFile
@@ -12,9 +13,15 @@ enum class FileStatus {
 }
 
 data class UiFile(
-    val documentFile: DocumentFile,
+    val uri: Uri,
+    val fileName: String,
     var status: FileStatus = FileStatus.PENDING
-)
+) {
+    // Helper constructor for compatibility during refactor if needed, 
+    // but we should switch to using Uri primarily.
+    constructor(documentFile: DocumentFile, fileName: String, status: FileStatus = FileStatus.PENDING) 
+        : this(documentFile.uri, fileName, status)
+}
 
 class FileAdapter(private var files: MutableList<UiFile>) : RecyclerView.Adapter<FileAdapter.ViewHolder>() {
 
@@ -27,10 +34,9 @@ class FileAdapter(private var files: MutableList<UiFile>) : RecyclerView.Adapter
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = files[position]
-        val fileName = item.documentFile.name ?: "Unknown"
         
         // Show name without extension
-        holder.binding.tvFileName.text = fileName.substringBeforeLast('.')
+        holder.binding.tvFileName.text = item.fileName.substringBeforeLast('.')
 
         // Hide path/status as requested
         holder.binding.tvFilePath.visibility = android.view.View.GONE

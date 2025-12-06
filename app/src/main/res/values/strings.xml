@@ -1,7 +1,6 @@
 <resources>
     <string name="app_name">unNCM</string>
-    <string name="input_folder_label">Input Folder</string>
-    <string name="output_folder_label">Output Folder</string>
+    <string name="input_folder_label">Music Folder (NCM files)</string>
     <string name="scan_button">Scan</string>
     <string name="convert_button">Convert All</string>
     <string name="no_files_found">No pending .ncm files found.</string>
@@ -10,4 +9,17 @@
     <string name="status_idle">Idle</string>
     <string name="status_converting">Converting...</string>
     <string name="status_done">Done</string>
+    <string name="output_folder_description">Output files will be saved to: [input folder]/unlocked</string>
+    
+    <string name="msg_invalid_directory">Invalid directory selected</string>
+    <string name="msg_permission_denied">Permission denied</string>
+    <string name="msg_select_input_dir">Please select input directory</string>
+    <string name="msg_invalid_input_dir">Invalid input directory</string>
+    <string name="msg_create_output_fail">Could not create \'unlocked\' directory in input folder</string>
+    <string name="msg_convert_complete">All files converted</string>
+    <string name="msg_convert_error">Finished with errors</string>
+    <string name="status_scanning">Scanning...</string>
+    <string name="status_remaining">Remaining: %d</string>
+    <string name="label_threads">Threads: %d</string>
+    <string name="msg_output_invalid">Output folder is not a valid directory or not set.</string>
 </resources>
