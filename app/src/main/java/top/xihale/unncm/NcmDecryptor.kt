@@ -1,5 +1,9 @@
 package top.xihale.unncm
 
+/**
+ * NCM file format decryptor implementation
+ * Reference: https://git.unlock-music.dev/um/cli
+ */
 import android.util.Base64
 import org.json.JSONObject
 import top.xihale.unncm.utils.CryptoUtils
@@ -178,12 +182,13 @@ class NcmDecryptor(private val inputStream: InputStream) {
             val artistList = mutableListOf<String>()
             val artistsJson = json.optJSONArray("artist")
             if (artistsJson != null) {
-                for (i in 0 until artistsJson.length()) {
-                    val artistGroup = artistsJson.optJSONArray(i)
-                    if (artistGroup != null && artistGroup.length() > 0) {
-                        val name = artistGroup.optString(0)
-                        if (name.isNotEmpty()) {
-                            artistList.add(name)
+                (0 until artistsJson.length()).forEach { i ->
+                    artistsJson.optJSONArray(i)?.let { artistGroup ->
+                        if (artistGroup.length() > 0) {
+                            val name = artistGroup.optString(0)
+                            if (name.isNotEmpty()) {
+                                artistList.add(name)
+                            }
                         }
                     }
                 }

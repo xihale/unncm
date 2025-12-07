@@ -1,7 +1,6 @@
 package top.xihale.unncm
 
 import android.app.Application
-import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
@@ -15,13 +14,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import top.xihale.unncm.utils.FastScanner
 import top.xihale.unncm.utils.Logger
+import top.xihale.unncm.MediaMetadataRetrieverHelper
 import java.io.File
-
 sealed class ConversionUiState {
     object Idle : ConversionUiState()
+    object Scanning : ConversionUiState()
     object Converting : ConversionUiState()
-    data class Completed(val successCount: Int, val errorCount: Int) : ConversionUiState()
+    object Completed : ConversionUiState()
     data class Error(val message: String) : ConversionUiState()
 }
 
@@ -30,17 +36,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val logger = Logger.withTag("MainViewModel")
 
     // LiveData for UI state
-    private val _inputDocumentFile = MutableLiveData<DocumentFile?>()
-    val inputDocumentFile: LiveData<DocumentFile?> = _inputDocumentFile
+    private val _inputDir = MutableLiveData<DocumentFile?>()
+    val inputDir: LiveData<DocumentFile?> = _inputDir
 
-    private val _outputDocumentFile = MutableLiveData<DocumentFile?>()
-    val outputDocumentFile: LiveData<DocumentFile?> = _outputDocumentFile
+    private val _outputDir = MutableLiveData<DocumentFile?>()
+    val outputDir: LiveData<DocumentFile?> = _outputDir
 
-    private val _pendingFiles = MutableLiveData<MutableList<UiFile>>()
-    val pendingFiles: LiveData<MutableList<UiFile>> = _pendingFiles
-
-    private val _isScanning = MutableLiveData<Boolean>()
-    val isScanning: LiveData<Boolean> = _isScanning
+    private val _pendingFiles = MutableStateFlow<List<UiFile>>(emptyList())
+    val pendingFiles: StateFlow<List<UiFile>> = _pendingFiles.asStateFlow()
 
     private val _conversionStatus = MutableLiveData<ConversionUiState>()
     val conversionStatus: LiveData<ConversionUiState> = _conversionStatus
@@ -51,69 +54,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val id = System.identityHashCode(this)
         logger.d("MainViewModel initialized. Instance ID: $id")
-        
+
         // Initialize with empty list
-        _pendingFiles.value = mutableListOf()
-        _isScanning.value = false
+        _pendingFiles.value = emptyList()
         _conversionStatus.value = ConversionUiState.Idle
     }
 
-    fun setInputDocumentFile(documentFile: DocumentFile?) {
-        viewModelScope.launch(Dispatchers.Main) {
-            _inputDocumentFile.value = documentFile
-            logger.d("Input document file set: ${documentFile?.name}")
-        }
+    fun setInputDir(documentFile: DocumentFile?) {
+        _inputDir.value = documentFile.also { logger.d("Input document file set: ${it?.name}") }
     }
 
-    // Synchronous version - only call from main thread
-    fun setInputDocumentFileSync(documentFile: DocumentFile?) {
-        _inputDocumentFile.value = documentFile
-        logger.d("Input document file set sync: ${documentFile?.name}")
-    }
-
-    fun setOutputDocumentFile(documentFile: DocumentFile?) {
+    fun setOutputDir(documentFile: DocumentFile?) {
         viewModelScope.launch(Dispatchers.Main) {
-            _outputDocumentFile.value = documentFile
-            logger.d("Output document file set: ${documentFile?.name}")
+            _outputDir.value = documentFile.also { logger.d("Output document file set: ${it?.name}") }
         }
     }
 
     fun setPendingFiles(files: List<UiFile>) {
-        viewModelScope.launch(Dispatchers.Main) {
-            _pendingFiles.value = files.toMutableList()
-            logger.d("Pending files updated: ${files.size} files")
-        }
-    }
-
-    fun addPendingFile(file: UiFile) {
-        viewModelScope.launch(Dispatchers.Main) {
-            val currentList = _pendingFiles.value ?: mutableListOf()
-            currentList.add(file)
-            _pendingFiles.value = currentList
-            logger.d("Added pending file: ${file.fileName}")
+        _pendingFiles.value = files.also {
+            logger.d("Pending files updated: ${it.size} files")
         }
     }
 
     fun removePendingFile(file: UiFile) {
-        viewModelScope.launch(Dispatchers.Main) {
-            val currentList = _pendingFiles.value ?: mutableListOf()
-            currentList.remove(file)
-            _pendingFiles.value = currentList
-            logger.d("Removed pending file: ${file.fileName}")
+        _pendingFiles.update { currentList ->
+            (currentList - file).also {
+                logger.d("Removed pending file: ${file.fileName}")
+            }
         }
     }
 
     fun clearPendingFiles() {
-        viewModelScope.launch(Dispatchers.Main) {
-            _pendingFiles.value = mutableListOf()
+        _pendingFiles.value = emptyList<UiFile>().also {
             logger.d("Pending files cleared")
-        }
-    }
-
-    fun setScanning(isScanning: Boolean) {
-        viewModelScope.launch(Dispatchers.Main) {
-            _isScanning.value = isScanning
-            logger.d("Scanning state changed: $isScanning")
         }
     }
 
@@ -121,243 +94,226 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _conversionStatus.value = ConversionUiState.Idle
     }
 
-        
+
     private fun isValidOutputDirectory(docFile: DocumentFile): Boolean {
-        if (!docFile.exists() || !docFile.isDirectory) return false
-        try {
-             val testName = ".test_${System.currentTimeMillis()}"
-             val testFile = docFile.createFile("text/plain", testName)
-             if (testFile != null) {
-                 testFile.delete()
-                 return true
-             }
-        } catch (e: Exception) {
-             // Ignore
-        }
-        return false
+        return !(!docFile.exists() || !docFile.isDirectory)
     }
 
     fun scanFiles() {
         logger.d("scanFiles called")
-        if (_isScanning.value == true) return
+        if (_conversionStatus.value is ConversionUiState.Scanning) return
 
-        val inputDocFile = _inputDocumentFile.value
-        logger.d("Input document file check: file=${inputDocFile?.name}, uri=${inputDocFile?.uri}, exists=${inputDocFile?.exists()}")
+        val inputDir = _inputDir.value
+        logger.d("Input dir check: file=${inputDir?.name}, uri=${inputDir?.uri}, exists=${inputDir?.exists()}")
 
-        if (inputDocFile == null) {
-            logger.e("Input document file is null")
-            _conversionStatus.value = ConversionUiState.Error(getApplication<Application>().getString(R.string.msg_invalid_input_dir))
-            return
-        }
-
-        if (!inputDocFile.exists()) {
-            logger.e("Input directory does not exist: ${inputDocFile.uri}")
-            _conversionStatus.value = ConversionUiState.Error(getApplication<Application>().getString(R.string.msg_invalid_input_dir))
+        // Early validation returns
+        if (inputDir == null || !inputDir.exists()) {
+            logger.e("Input directory invalid or null")
+            _conversionStatus.value =
+                ConversionUiState.Error(getApplication<Application>().getString(R.string.msg_invalid_input_dir))
             return
         }
 
         scanJob?.cancel()
         scanJob = viewModelScope.launch(Dispatchers.IO) {
-            setScanning(true)
+            _conversionStatus.postValue(ConversionUiState.Scanning)
+            clearPendingFiles() // Clear existing list
+
             try {
-                logger.d("Setting up 'unlocked' output directory")
-                var unlockedDir = inputDocFile.findFile("unlocked")
-
-                if (unlockedDir != null && !isValidOutputDirectory(unlockedDir)) {
-                    logger.w("Found 'unlocked' but it seems invalid/stale. Ignoring.")
-                    unlockedDir = null
-                }
-
-                if (unlockedDir == null) {
-                     unlockedDir = inputDocFile.createDirectory("unlocked")
-                }
-
-                if (unlockedDir != null) {
-                    setOutputDocumentFile(unlockedDir)
-                } else {
-                    logger.e("Failed to create 'unlocked' directory")
-                     withContext(Dispatchers.Main) {
-                        setScanning(false)
-                        _conversionStatus.value = ConversionUiState.Error(getApplication<Application>().getString(R.string.msg_create_output_fail))
-                    }
-                    return@launch
-                }
+                val unlockedDir = setupOutputDirectory(inputDir) ?: return@launch
 
                 logger.i("=== Starting file scan ===")
-                logger.i("Input directory: ${inputDocFile.name}")
-                logger.i("Output directory exists: ${outputDocumentFile.value?.exists()}")
-
-                // Scan input directory
-                logger.i("--- Scanning input directory ---")
-                val audioFiles = top.xihale.unncm.utils.FastScanner.scanAudioFiles(getApplication(), inputDocFile.uri)
-                logger.i("Found ${audioFiles.size} total audio files in input directory")
-
-                // Separate file types
-                val allNcmFiles = audioFiles.filter { it.fileName.endsWith(".ncm", ignoreCase = true) }
-                val allOtherAudioFiles = audioFiles.filter { !it.fileName.endsWith(".ncm", ignoreCase = true) }
-
-                logger.i("File type breakdown:")
-                logger.i("  NCM files: ${allNcmFiles.size}")
-                logger.i("  Other audio files: ${allOtherAudioFiles.size}")
-
-                // Log file names for debugging
-                if (allNcmFiles.isNotEmpty()) {
-                    logger.i("NCM files found:")
-                    allNcmFiles.take(10).forEach { file ->
-                        logger.i("  - ${file.fileName}")
-                    }
-                    if (allNcmFiles.size > 10) {
-                        logger.i("  ... and ${allNcmFiles.size - 10} more NCM files")
-                    }
-                }
-
-                if (allOtherAudioFiles.isNotEmpty()) {
-                    logger.i("Other audio files found:")
-                    allOtherAudioFiles.take(10).forEach { file ->
-                        logger.i("  - ${file.fileName}")
-                    }
-                    if (allOtherAudioFiles.size > 10) {
-                        logger.i("  ... and ${allOtherAudioFiles.size - 10} more audio files")
-                    }
-                }
-
-                // Check unlocked directory
-                logger.i("--- Checking unlocked directory ---")
-                val outputBaseNames = if (outputDocumentFile.value?.exists() == true) {
-                    val outputFiles = top.xihale.unncm.utils.FastScanner.listFileNames(getApplication(), outputDocumentFile.value!!.uri)
-                    logger.i("Found ${outputFiles.size} files in unlocked directory:")
-                    outputFiles.take(10).forEach { fileName ->
-                        logger.i("  - $fileName")
-                    }
-                    if (outputFiles.size > 10) {
-                        logger.i("  ... and ${outputFiles.size - 10} more files")
-                    }
-                    outputFiles.map { it.substringBeforeLast('.') }.toSet()
-                } else {
-                    logger.w("Unlocked directory does not exist")
-                    emptySet()
-                }
-
-                // Filter NCM files
-                logger.i("--- Filtering NCM files ---")
-                val ncmFiles = allNcmFiles.filter {
-                    val baseName = it.fileName.substringBeforeLast('.')
-                    val shouldProcess = baseName !in outputBaseNames
-                    if (!shouldProcess) {
-                        logger.d("  [SKIP] NCM file already converted: ${it.fileName}")
-                    } else {
-                        logger.d("  [KEEP] NCM file needs conversion: ${it.fileName}")
-                    }
-                    shouldProcess
-                }
-
-                // Keep all other audio files for metadata checking
-                val otherAudioFiles = allOtherAudioFiles
-                logger.d("  [KEEP] All ${otherAudioFiles.size} other audio files for metadata checking")
-
-                // Summary
-                logger.i("--- Scan summary ---")
-                logger.i("Total files found: ${audioFiles.size}")
-                logger.i("NCM files to process: ${ncmFiles.size} (filtered from ${allNcmFiles.size})")
-                logger.i("Other audio files to process: ${otherAudioFiles.size}")
-                logger.i("Total files in processing list: ${ncmFiles.size + otherAudioFiles.size}")
-
-                // Combine files for processing
-                val allToProcess = ncmFiles + otherAudioFiles
-                logger.i("=== Scan completed, starting processing ===")
+                val outputBaseNames = getOutputBaseNames(unlockedDir)
                 
-                logger.i("Total files to process: ${allToProcess.size}")
+                val batch = mutableListOf<UiFile>()
+                
+                FastScanner.scanAudioFilesFlow(getApplication(), inputDir.uri)
+                    .buffer(100)
+                                        .collect { uiFile ->
+                                            val isNcm = uiFile.fileName.endsWith(".ncm", ignoreCase = true)
+                                            val baseName = uiFile.fileName.substringBeforeLast('.')
+                                            
+                                            if (isNcm) {
+                                                // Skip NCM files that are already in output directory
+                                                if (baseName in outputBaseNames) {
+                                                    return@collect
+                                                }
+                                            } else {
+                                                // Regular audio file: Check if metadata is missing
+                                                // This is a blocking call, but we are on IO thread.
+                                                // For very large folders, this might slow down the scan, but it's necessary requirement.
+                                                val needsProcessing = MediaMetadataRetrieverHelper.analyzeMetadataFromUri(getApplication(), uiFile.uri)
+                                                if (!needsProcessing) {
+                                                    return@collect
+                                                }
+                                            }
+                                            
+                                            batch.add(uiFile)                        
+                        // Update UI in batches
+                        if (batch.size >= 50) {
+                            val batchCopy = batch.toList()
+                            _pendingFiles.update { it + batchCopy }
+                            batch.clear()
+                        }
+                    }
+                
+                // Flush remaining items
+                if (batch.isNotEmpty()) {
+                    _pendingFiles.update { it + batch }
+                }
 
-                withContext(Dispatchers.Main) {
-                    setPendingFiles(allToProcess)
-                    setScanning(false)
-                }
+                logger.i("=== Scan completed ===")
+                _conversionStatus.postValue(ConversionUiState.Idle)
             } catch (e: Exception) {
-                logger.e("Error during file scan", e)
-                withContext(Dispatchers.Main) {
-                    setScanning(false)
-                    _conversionStatus.value = ConversionUiState.Error("Error scanning files: ${e.message}")
-                }
+                handleScanError(e)
             }
+        }
+    }
+
+    private suspend fun setupOutputDirectory(inputDocFile: DocumentFile): DocumentFile? {
+        logger.d("Setting up 'unlocked' output directory")
+
+        // Try existing directory first, validate if it exists, otherwise create it
+        val unlockedDir = inputDocFile.findFile("unlocked")?.takeIf { isValidOutputDirectory(it) }
+            ?: inputDocFile.createDirectory("unlocked")
+
+        return unlockedDir?.also {
+            setOutputDir(it)
+        } ?: run {
+            logger.e("Failed to create 'unlocked' directory")
+            withContext(Dispatchers.Main) {
+                _conversionStatus.value = ConversionUiState.Error(
+                    getApplication<Application>().getString(R.string.msg_create_output_fail)
+                )
+            }
+            null
+        }
+    }
+
+    
+
+    private suspend fun getOutputBaseNames(outputDir: DocumentFile): Set<String> {
+        logger.i("--- Checking unlocked directory ---")
+        return if (outputDir.exists()) {
+            val outputFiles = FastScanner.listFileNames(
+                getApplication(),
+                outputDir.uri
+            )
+            logger.i("Found ${outputFiles.size} files in unlocked directory:")
+            outputFiles.map { it.substringBeforeLast('.') }.toSet()
+        } else {
+            logger.e("Unlocked directory does not exist")
+            emptySet()
+        }
+    }
+
+    private suspend fun handleScanError(e: Exception) {
+        logger.e("Error during file scan", e)
+        withContext(Dispatchers.Main) {
+            _conversionStatus.value = ConversionUiState.Error("Error scanning files: ${e.message}")
         }
     }
 
     fun convertFiles(maxThreads: Int, cacheDir: File) {
         if (_conversionStatus.value is ConversionUiState.Converting) return
-        
-        val inputDocFile = _inputDocumentFile.value
-        var outputDocFile = _outputDocumentFile.value
-        val pendingFilesList = _pendingFiles.value ?: emptyList()
 
-        if (outputDocFile == null || !outputDocFile.exists()) {
-             val unlocked = inputDocFile?.findFile("unlocked")
-                            ?: inputDocFile?.createDirectory("unlocked")
-             unlocked?.let { setOutputDocumentFile(it); outputDocFile = it }
-        }
+        val inputDir = _inputDir.value
+        var outputDir = _outputDir.value
+        val pendingFiles = _pendingFiles.value
 
-        if (outputDocFile == null) {
-            _conversionStatus.value = ConversionUiState.Error(getApplication<Application>().getString(R.string.msg_create_output_fail))
+        // Early validation and setup
+        outputDir = ensureOutputDirectory(outputDir, inputDir) ?: return
+
+        if (pendingFiles.isEmpty()) {
+            _conversionStatus.value =
+                ConversionUiState.Error(getApplication<Application>().getString(R.string.no_files_found))
             return
         }
 
-        if (pendingFilesList.isEmpty()) {
-            _conversionStatus.value = ConversionUiState.Error(getApplication<Application>().getString(R.string.no_files_found))
-            return
-        }
-        
-        val fileConverter = FileConverter(getApplication(), outputDocFile!!, cacheDir)
-        
+        val optimalThreads = maxThreads
+
+        val fileConverter = FileConverter(getApplication(), outputDir, cacheDir)
+
         conversionJob = viewModelScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) {
-                _conversionStatus.value = ConversionUiState.Converting
-            }
+            setConversionStatus(ConversionUiState.Converting)
 
             try {
-                val filesToConvert = ArrayList(pendingFilesList)
-                val semaphore = Semaphore(maxThreads)
-                var successCount = 0
-                var errorCount = 0
-
-                val deferreds = filesToConvert.map { uiFile ->
-                    async(Dispatchers.IO) {
-                        if (uiFile.status == FileStatus.DONE) {
-                            return@async
-                        }
-
-                        semaphore.withPermit {
-                            val result = fileConverter.processFile(uiFile)
-                            
-                            withContext(Dispatchers.Main) {
-                                when (result) {
-                                    is ConversionResult.Success, ConversionResult.Skipped -> {
-                                        successCount++
-                                        uiFile.status = FileStatus.DONE
-                                        removePendingFile(uiFile)
-                                    }
-                                    is ConversionResult.Failure -> {
-                                        errorCount++
-                                        uiFile.status = FileStatus.ERROR
-                                        // Force update list to refresh UI for this item
-                                        _pendingFiles.value = _pendingFiles.value
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                deferreds.awaitAll()
-
-                withContext(Dispatchers.Main) {
-                     _conversionStatus.value = ConversionUiState.Completed(successCount, errorCount)
-                }
+                processFilesConcurrently(
+                    fileConverter,
+                    pendingFiles,
+                    optimalThreads
+                )
+                setConversionStatus(ConversionUiState.Completed)
             } catch (e: Exception) {
-                logger.e("Error during conversion process", e)
-                withContext(Dispatchers.Main) {
-                    _conversionStatus.value = ConversionUiState.Error(e.message ?: "Conversion failed")
+                handleConversionError(e)
+            }
+        }
+    }
+
+    private fun ensureOutputDirectory(
+        outputDocFile: DocumentFile?,
+        inputDocFile: DocumentFile?
+    ): DocumentFile? {
+        val outputFile = outputDocFile?.takeIf { it.exists() }
+            ?: (inputDocFile?.findFile("unlocked") ?: inputDocFile?.createDirectory("unlocked"))?.also {
+                setOutputDir(it)
+            }
+
+        if (outputFile == null) {
+            _conversionStatus.value =
+                ConversionUiState.Error(getApplication<Application>().getString(R.string.msg_create_output_fail))
+            return null
+        }
+
+        return outputFile
+    }
+
+    private suspend fun setConversionStatus(status: ConversionUiState) {
+        withContext(Dispatchers.Main) {
+            _conversionStatus.value = status
+        }
+    }
+
+    private suspend fun processFilesConcurrently(
+        fileConverter: FileConverter,
+        pendingFilesList: List<UiFile>,
+        maxThreads: Int
+    ) {
+        val filesToConvert = ArrayList(pendingFilesList)
+        val semaphore = Semaphore(maxThreads)
+
+        val deferred = filesToConvert.map { uiFile ->
+            viewModelScope.async(Dispatchers.IO) {
+                if (uiFile.status == FileStatus.DONE) return@async
+
+                semaphore.withPermit {
+                    val result = fileConverter.processFile(uiFile)
+                    updateFileStatus(result, uiFile)
                 }
             }
         }
+
+        deferred.awaitAll()
+    }
+
+    private suspend fun updateFileStatus(result: ConversionResult, uiFile: UiFile) {
+        when (result) {
+            is ConversionResult.Success, ConversionResult.Skipped -> {
+                uiFile.status = FileStatus.DONE
+                removePendingFile(uiFile)
+            }
+
+            is ConversionResult.Failure -> {
+                uiFile.status = FileStatus.ERROR
+                // Force update list to refresh UI for this item
+                _pendingFiles.update { it.toList() }
+            }
+        }
+    }
+
+    private suspend fun handleConversionError(e: Exception) {
+        logger.e("Error during conversion process", e)
+        setConversionStatus(ConversionUiState.Error(e.message ?: "Conversion failed"))
     }
 
     override fun onCleared() {

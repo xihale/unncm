@@ -10,6 +10,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.documentfile.provider.DocumentFile
 import androidx.activity.viewModels
 import androidx.lifecycle.Observer
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import top.xihale.unncm.databinding.ActivityMainBinding
 import top.xihale.unncm.utils.Logger
 import com.google.android.material.color.DynamicColors
@@ -18,6 +20,7 @@ import java.io.File
 import androidx.core.view.WindowCompat
 import android.graphics.Color
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.edit
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,35 +34,38 @@ class MainActivity : AppCompatActivity() {
 
     private val openDocumentTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         logger.d("Folder picker result received: $uri")
-        if (uri != null) {
-            try {
-                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                val docFile = DocumentFile.fromTreeUri(this, uri)
-                logger.i("Selected folder: ${docFile?.name}, URI: $uri, isDirectory: ${docFile?.isDirectory}")
-
-                if (docFile != null && docFile.isDirectory) {
-                    if (currentFolderRequestCode == INPUT_FOLDER_REQUEST_CODE) {
-                        logger.i("Setting input folder: $uri")
-
-                        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-                        prefs.edit().putString("input_uri", uri.toString()).apply()
-
-                        viewModel.setInputDocumentFileSync(docFile)
-                        // Explicit scan when user selects a folder
-                        viewModel.scanFiles()
-                    } else {
-                        logger.w("Invalid request code: $currentFolderRequestCode")
-                    }
-                } else {
-                    logger.w("Invalid directory selected: $uri")
-                    Toast.makeText(this, getString(R.string.msg_invalid_directory), Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                logger.e("Error handling folder selection", e)
-                Toast.makeText(this, "Error setting folder: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        } else {
+        if (uri == null) {
             logger.d("Folder picker cancelled")
+            return@registerForActivityResult
+        }
+
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+
+            val inputDir = DocumentFile.fromTreeUri(this, uri)
+            logger.i("Selected folder: ${inputDir?.name}, URI: $uri, isDirectory: ${inputDir?.isDirectory}")
+
+            if (inputDir == null) {
+                logger.w("DocumentFile.fromTreeUri returned null for URI: $uri")
+                return@registerForActivityResult
+            }
+
+            if (currentFolderRequestCode != INPUT_FOLDER_REQUEST_CODE) {
+                logger.w("Invalid request code: $currentFolderRequestCode")
+                return@registerForActivityResult
+            }
+
+            logger.i("Setting input folder: $uri")
+
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            prefs.edit { putString("input_uri", uri.toString()) }
+
+            viewModel.setInputDir(inputDir)
+
+            viewModel.scanFiles()
+        } catch (e: Exception) {
+            logger.e("Error handling folder selection", e)
+            Toast.makeText(this, "Error setting folder: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -109,30 +115,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupViewModelObservers() {
-        // Observe pending files changes
-        viewModel.pendingFiles.observe(this, Observer { files ->
-            adapter.updateList(files)
-            binding.tvStatus.text = files.size.toString()
-            logger.d("Pending files updated in UI: ${files.size} files")
-        })
+        // Observe pending files changes (StateFlow)
+        lifecycleScope.launch {
+            viewModel.pendingFiles.collect { files ->
+                adapter.updateList(files)
+                // Only update status text if we are not currently scanning (Converting state uses button for status)
+                val currentState = viewModel.conversionStatus.value
+                if (currentState !is ConversionUiState.Scanning) {
+                    binding.tvStatus.text = files.size.toString()
+                }
+                logger.d("Pending files updated in UI: ${files.size} files")
+            }
+        }
 
         // Observe input document file changes
-        viewModel.inputDocumentFile.observe(this, Observer { docFile ->
-            if (docFile != null) {
-                binding.inputFolderEditText.setText(docFile.uri.toString())
-                logger.d("Input document file updated in UI: ${docFile.name}")
+        viewModel.inputDir.observe(this, Observer { docFile ->
+            docFile?.let {
+                binding.inputFolderEditText.setText(it.uri.toString())
+                logger.d("Input document file updated in UI: ${it.name}")
             }
-        })
-
-        // Observe scanning state
-        viewModel.isScanning.observe(this, Observer { isScanning ->
-            if (isScanning) {
-                binding.tvStatus.text = getString(R.string.status_scanning)
-            } else {
-                val count = viewModel.pendingFiles.value?.size ?: 0
-                binding.tvStatus.text = count.toString()
-            }
-            logger.d("Scanning state updated: $isScanning")
         })
 
         // Observe conversion status
@@ -141,6 +142,12 @@ class MainActivity : AppCompatActivity() {
                 is ConversionUiState.Idle -> {
                     binding.btnConvert.isEnabled = true
                     binding.btnConvert.text = getString(R.string.convert_button)
+                    val count = viewModel.pendingFiles.value?.size ?: 0
+                    binding.tvStatus.text = count.toString()
+                }
+                is ConversionUiState.Scanning -> {
+                    binding.btnConvert.isEnabled = false
+                    binding.tvStatus.text = getString(R.string.status_scanning)
                 }
                 is ConversionUiState.Converting -> {
                     binding.btnConvert.isEnabled = false
@@ -149,11 +156,7 @@ class MainActivity : AppCompatActivity() {
                 is ConversionUiState.Completed -> {
                     binding.btnConvert.isEnabled = true
                     binding.btnConvert.text = getString(R.string.convert_button)
-                    if (state.errorCount == 0) {
-                        Toast.makeText(this, getString(R.string.msg_convert_complete), Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this, getString(R.string.msg_convert_error), Toast.LENGTH_SHORT).show()
-                    }
+                    Toast.makeText(this, getString(R.string.msg_convert_complete), Toast.LENGTH_SHORT).show()
                     viewModel.resetConversionStatus()
                 }
                 is ConversionUiState.Error -> {
@@ -189,40 +192,40 @@ class MainActivity : AppCompatActivity() {
                         )
                     } catch (e: SecurityException) {
                         logger.e("Failed to restore persistent permission", e)
-                        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
                         prefs.edit().remove("input_uri").apply()
-                        return false
+                        // Fallthrough to check legacy path or return false
                     }
                 }
 
-                val docFile = DocumentFile.fromTreeUri(this, uri)
-                if (docFile != null && docFile.isDirectory && docFile.exists()) {
-                    viewModel.setInputDocumentFileSync(docFile)
+                // If permission is now okay (or was okay), check the file
+                DocumentFile.fromTreeUri(this, uri)?.takeIf { it.exists() }?.let { docFile ->
+                    viewModel.setInputDir(docFile)
                     logger.i("Successfully restored input folder: ${docFile.name}")
                     return true
-                } else {
-                    logger.w("DocumentFile validation failed - docFile: ${docFile != null}, isDirectory: ${docFile?.isDirectory}, exists: ${docFile?.exists()}")
-                    // Clear invalid URI
-                    val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-                    prefs.edit().remove("input_uri").apply()
                 }
+
+                logger.w("DocumentFile validation failed for URI: $uri")
+                // Clear invalid URI
+                prefs.edit().remove("input_uri").apply()
+
             } catch (e: Exception) {
                 logger.w("Failed to restore saved input URI", e)
             }
-        } else if (savedInputPath != null) {
+        }
+
+        if (savedInputPath != null) {
             logger.i("Restoring input folder from saved path (legacy)")
-            val file = File(savedInputPath)
-            if (file.exists() && file.isDirectory) {
+            
+            File(savedInputPath).takeIf { it.exists() && it.isDirectory }?.let { file ->
                 val docFile = DocumentFile.fromFile(file)
-                viewModel.setInputDocumentFileSync(docFile)
+                viewModel.setInputDir(docFile)
                 logger.i("Successfully restored input path: $savedInputPath")
                 return true
-            } else {
-                logger.w("Legacy input path does not exist or is not a directory: $savedInputPath")
-                // Clear invalid legacy path
-                val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-                prefs.edit().remove("input_path").apply()
             }
+            
+            logger.w("Legacy input path does not exist or is not a directory: $savedInputPath")
+            // Clear invalid legacy path
+            prefs.edit().remove("input_path").apply()
         }
 
         return false
@@ -265,7 +268,7 @@ class MainActivity : AppCompatActivity() {
         logger.d("Opening folder picker with request code: $requestCode")
         
         var initialUri: Uri? = null
-        if (requestCode == INPUT_FOLDER_REQUEST_CODE && viewModel.inputDocumentFile.value == null) {
+        if (requestCode == INPUT_FOLDER_REQUEST_CODE && viewModel.inputDir.value == null) {
              try {
                  initialUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fnetease%2Fcloudmusic%2FMusic")
              } catch (e: Exception) {

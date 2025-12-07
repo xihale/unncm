@@ -1,5 +1,6 @@
 package top.xihale.unncm
 
+import android.annotation.SuppressLint
 import android.graphics.Color
 import android.net.Uri
 import android.view.LayoutInflater
@@ -44,6 +45,7 @@ class FileAdapter(private var files: MutableList<UiFile>) : RecyclerView.Adapter
 
     override fun getItemCount() = files.size
 
+    @SuppressLint("NotifyDataSetChanged")
     fun updateList(newFiles: List<UiFile>) {
         files = newFiles.toMutableList()
         notifyDataSetChanged()

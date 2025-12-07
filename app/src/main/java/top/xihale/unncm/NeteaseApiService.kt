@@ -6,7 +6,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import top.xihale.unncm.utils.Logger
-import java.math.BigInteger
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -16,6 +15,44 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
+
+/**
+ * Extended metadata that includes lyrics and cover data
+ */
+data class ExtendedMusicMetadata(
+    val metadata: MusicMetadata,
+    val id: Long,
+    val coverUrl: String?,
+    val duration: Long,
+    val lyrics: String?,
+    val coverData: ByteArray?
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as ExtendedMusicMetadata
+        return metadata == other.metadata && id == other.id
+    }
+
+    override fun hashCode(): Int {
+        var result = metadata.hashCode()
+        result = 31 * result + id.hashCode()
+        return result
+    }
+}
+
+/**
+ * Temporary search result that includes all fields needed for API processing
+ */
+private data class SongSearchResult(
+    val id: Long,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val coverUrl: String?,
+    val duration: Long,
+    val metadata: MusicMetadata
+)
 
 object NeteaseApiService {
     private val logger = Logger.withTag("NeteaseApiService")
@@ -31,16 +68,14 @@ object NeteaseApiService {
         const val PRESET_KEY = "0CoJUm6Qyw8W8jud"
         const val IV = "0102030405060708"
         const val SECRET_KEY = "a8LWv2uAtXjzSfkQ"
-        const val PUB_KEY_MODULUS = "00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbca2dc37e78ed629dc22e423eeee65606e79675343f46c7a1f5095f5fd70dbaa5839da6bf42f7258509a831f1741de61fd59556fa4fd274aa35fd97d87"
-        const val PUB_KEY_EXPONENT = "10001"
         const val ENC_SEC_KEY = "2d48fd9fb8e58bc9c1f14a7bda1b8e49a3520a67a2300a1f73766caee29f2411c5350bceb15ed196ca963d6a6d0b61f3734f0a0f4a172ad853f16dd06018bc5ca8fb640eaa8decd1cd41f66e166cea7a3023bd63960e656ec97751cfc7ce08d943928e9db9b35400ff3d138bda1ab511a06fbee75585191cabe0e6e63f7350d6"
     }
 
     suspend fun getCompleteMetadata(
-        keyword: String, 
-        fetchCover: Boolean = true, 
+        keyword: String,
+        fetchCover: Boolean = true,
         fetchLyrics: Boolean = true
-    ): Result<MusicMetadata> = coroutineScope {
+    ): Result<ExtendedMusicMetadata> = coroutineScope {
         try {
             val searchResult = withContext(Dispatchers.IO) { searchSong(keyword) }
                 ?: return@coroutineScope Result.failure(Exception("Search returned null for: $keyword"))
@@ -60,19 +95,23 @@ object NeteaseApiService {
             val lyrics = lyricsDeferred.await()
             val coverData = coverDeferred.await()
 
-            val metadata = searchResult.copy(
+            val extendedMetadata = ExtendedMusicMetadata(
+                metadata = searchResult.metadata,
+                id = searchResult.id,
+                coverUrl = searchResult.coverUrl,
+                duration = searchResult.duration,
                 lyrics = lyrics,
                 coverData = coverData
             )
 
-            Result.success(metadata)
+            Result.success(extendedMetadata)
         } catch (e: Exception) {
             logger.e("Metadata fetch failed for: $keyword", e)
             Result.failure(e)
         }
     }
 
-    private fun searchSong(keyword: String): MusicMetadata? {
+    private fun searchSong(keyword: String): SongSearchResult? {
         try {
             val responseJson = postWeApi(
                 url = "$BASE_URL/cloudsearch/pc",
@@ -93,15 +132,20 @@ object NeteaseApiService {
                 }
             } else "Unknown"
 
-            return MusicMetadata(
+            val metadata = MusicMetadata(
+                title = song.getString("name"),
+                artist = artistName,
+                album = albumObj?.optString("name") ?: ""
+            )
+
+            return SongSearchResult(
                 id = song.getLong("id"),
                 title = song.getString("name"),
                 artist = artistName,
                 album = albumObj?.optString("name") ?: "",
                 coverUrl = albumObj?.optString("picUrl")?.replace("http://", "https://"),
                 duration = song.optLong("dt", 0),
-                lyrics = null,
-                coverData = null
+                metadata = metadata
             )
         } catch (e: Exception) {
             logger.w("Search error for '$keyword': ${e.message}")
@@ -171,31 +215,18 @@ object NeteaseApiService {
         if (lrc.isEmpty()) return tlyric
         
         data class Line(val time: Long, val priority: Int, val content: String)
+        val pattern = Regex("""\[(\d+):(\d+)(?:\.(\d+))?]""")
         
-        fun parse(text: String, priority: Int): List<Line> {
-            return text.lines().filter { it.isNotBlank() }.mapNotNull { line ->
-                try {
-                    val start = line.indexOf('[')
-                    val end = line.indexOf(']')
-                    if (start != -1 && end != -1) {
-                        val timeStr = line.substring(start + 1, end)
-                        val parts = timeStr.split(":")
-                        if (parts.size == 2) {
-                             val min = parts[0].toLong()
-                             val secParts = parts[1].split(".")
-                             val sec = secParts[0].toLong()
-                             val msStr = if (secParts.size > 1) secParts[1] else "0"
-                             val ms = if (msStr.length == 2) msStr.toLong() * 10 
-                                      else if (msStr.length == 1) msStr.toLong() * 100
-                                      else msStr.take(3).padEnd(3, '0').toLong()
-                             val time = min * 60000 + sec * 1000 + ms
-                             return@mapNotNull Line(time, priority, line)
-                        }
-                    }
-                } catch (_: Exception) { }
-                null
+        fun parse(text: String, priority: Int): List<Line> = text.lines()
+            .filter { it.isNotBlank() }
+            .mapNotNull { line ->
+                pattern.find(line)?.let { match ->
+                    val (min, sec, msStr) = match.destructured
+                    val ms = if (msStr.isEmpty()) 0L else msStr.padEnd(3, '0').take(3).toLong()
+                    val time = min.toLong() * 60000 + sec.toLong() * 1000 + ms
+                    Line(time, priority, line)
+                }
             }
-        }
         
         val list1 = parse(lrc, 0)
         val list2 = parse(tlyric, 1)

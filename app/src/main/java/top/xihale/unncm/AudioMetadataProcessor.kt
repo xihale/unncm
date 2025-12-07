@@ -1,5 +1,7 @@
 package top.xihale.unncm
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import org.jaudiotagger.tag.TagOptionSingleton
@@ -32,9 +34,50 @@ object AudioMetadataProcessor {
         writer: (OutputStream) -> Unit,
         format: String, // e.g. "mp3", "flac"
         metadata: MusicMetadata,
+        lyrics: String? = null,
+        coverData: ByteArray? = null,
         outputStream: OutputStream,
         cacheDir: File
     ): Result<Unit> {
+        return try {
+            processAudioDataInternal(writer, format, metadata, lyrics, coverData, outputStream, cacheDir)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            logger.e("Error processing tags", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Async version of processAudioData for better IO performance
+     */
+    suspend fun processAudioDataAsync(
+        writer: (OutputStream) -> Unit,
+        format: String, // e.g. "mp3", "flac"
+        metadata: MusicMetadata,
+        lyrics: String? = null,
+        coverData: ByteArray? = null,
+        outputStream: OutputStream,
+        cacheDir: File
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            processAudioDataInternal(writer, format, metadata, lyrics, coverData, outputStream, cacheDir)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            logger.e("Error processing tags", e)
+            Result.failure(e)
+        }
+    }
+
+    private fun processAudioDataInternal(
+        writer: (OutputStream) -> Unit,
+        format: String,
+        metadata: MusicMetadata,
+        lyrics: String? = null,
+        coverData: ByteArray? = null,
+        outputStream: OutputStream,
+        cacheDir: File
+    ) {
         var tempFile: File? = null
         try {
             // 1. Create a temporary file
@@ -58,24 +101,24 @@ object AudioMetadataProcessor {
             try { tag.setField(FieldKey.ARTIST, metadata.artist) } catch (e: Exception) {}
             try { tag.setField(FieldKey.ALBUM, metadata.album) } catch (e: Exception) {}
             
-            if (!metadata.lyrics.isNullOrEmpty()) {
+            if (!lyrics.isNullOrEmpty()) {
                 try {
-                    tag.setField(FieldKey.LYRICS, metadata.lyrics)
+                    tag.setField(FieldKey.LYRICS, lyrics)
                 } catch (e: Exception) {
                      logger.w("Could not set lyrics: ${e.message}")
                 }
             }
-            
-            if (metadata.coverData != null && metadata.coverData.isNotEmpty()) {
+
+            if (coverData != null && coverData.isNotEmpty()) {
                 try {
                     // Decode image bounds and mime type using Android API
                     val options = android.graphics.BitmapFactory.Options()
                     options.inJustDecodeBounds = true
-                    android.graphics.BitmapFactory.decodeByteArray(metadata.coverData, 0, metadata.coverData.size, options)
-                    
+                    android.graphics.BitmapFactory.decodeByteArray(coverData, 0, coverData.size, options)
+
                     // Use custom SafeAndroidArtwork to avoid ImageIO dependency and UnsupportedOperationException
                     val artwork = SafeAndroidArtwork()
-                    artwork.binaryData = metadata.coverData
+                    artwork.binaryData = coverData
                     artwork.mimeType = options.outMimeType ?: "image/jpeg"
                     artwork.width = options.outWidth
                     artwork.height = options.outHeight
@@ -96,11 +139,8 @@ object AudioMetadataProcessor {
             tempFile.inputStream().buffered(64 * 1024).use { fileIn ->
                 fileIn.copyTo(outputStream, bufferSize = 64 * 1024)
             }
-            
-            return Result.success(Unit)
         } catch (e: Exception) {
-            logger.e("Error processing tags", e)
-            return Result.failure(e)
+            throw e
         } finally {
             // 5. Clean up
             try { tempFile?.delete() } catch (e: Exception) {}
@@ -134,32 +174,131 @@ object AudioMetadataProcessor {
             val hasComplete = checkCompleteMetadata(tempFile)
             val hasLyrics = checkLyrics(tempFile)
             val hasCover = checkCoverArt(tempFile)
-            
+
             // Read existing tags
             val tags = try {
                 val audio = AudioFileIO.read(tempFile)
                 val tag = audio.tagOrCreateAndSetDefault
                 MusicMetadata(
-                    id = 0,
                     title = tag.getFirst(FieldKey.TITLE) ?: "",
                     artist = tag.getFirst(FieldKey.ARTIST) ?: "",
-                    album = tag.getFirst(FieldKey.ALBUM) ?: "",
-                    coverUrl = null,
-                    duration = 0,
-                    lyrics = tag.getFirst(FieldKey.LYRICS),
-                    coverData = null
+                    album = tag.getFirst(FieldKey.ALBUM) ?: ""
                 )
             } catch (e: Exception) {
-                MusicMetadata(0, "", "", "", null, 0, null, null)
+                MusicMetadata("", "", "")
             }
 
             return MetadataAnalysisResult(hasComplete, hasLyrics, hasCover, tags)
 
         } catch (e: Exception) {
             logger.e("Error analyzing metadata for $fileName", e)
-            return MetadataAnalysisResult(false, false, false, MusicMetadata(0, "", "", "", null, 0, null, null))
+            return MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
         } finally {
             tempFile.delete()
+        }
+    }
+
+    /**
+     * Async version of analyzeMetadata for better performance
+     */
+    suspend fun analyzeMetadataAsync(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult = withContext(Dispatchers.IO) {
+        val tempFile = File(cacheDir, "analysis_${System.currentTimeMillis()}_$fileName")
+        try {
+            // Stream to temp file with optimized buffer for large files
+            BufferedInputStream(inputStream, 256 * 1024).use { input ->
+                tempFile.outputStream().buffered(256 * 1024).use { output ->
+                    // Use progress callback for large files
+                    val totalCopied = input.copyToWithProgress(output, bufferSize = 256 * 1024) { bytesCopied ->
+                        if (bytesCopied % (10 * 1024 * 1024) == 0L) { // Log every 10MB
+                            logger.d("Copied ${bytesCopied / 1024 / 1024}MB for $fileName")
+                        }
+                    }
+                    logger.d("Total copied: ${totalCopied / 1024 / 1024}MB for $fileName")
+                }
+            }
+
+            // Perform checks on the temp file
+            val hasComplete = checkCompleteMetadata(tempFile)
+            val hasLyrics = checkLyrics(tempFile)
+            val hasCover = checkCoverArt(tempFile)
+
+            // Read existing tags
+            val tags = try {
+                val audio = AudioFileIO.read(tempFile)
+                val tag = audio.tagOrCreateAndSetDefault
+                MusicMetadata(
+                    title = tag.getFirst(FieldKey.TITLE) ?: "",
+                    artist = tag.getFirst(FieldKey.ARTIST) ?: "",
+                    album = tag.getFirst(FieldKey.ALBUM) ?: ""
+                )
+            } catch (e: Exception) {
+                MusicMetadata("", "", "")
+            }
+
+            MetadataAnalysisResult(hasComplete, hasLyrics, hasCover, tags)
+
+        } catch (e: Exception) {
+            logger.e("Error analyzing metadata for $fileName", e)
+            MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    /**
+     * Memory-efficient metadata analysis for large files
+     * Only analyzes the first few KB of the file for metadata
+     */
+    suspend fun analyzeMetadataLightweight(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult = withContext(Dispatchers.IO) {
+        try {
+            // Only read first 1MB for metadata analysis (most metadata is at the beginning)
+            val headerBuffer = ByteArray(1024 * 1024) // 1MB buffer
+            val bytesRead = inputStream.use { input ->
+                input.read(headerBuffer)
+            }
+
+            if (bytesRead <= 0) {
+                logger.w("Empty file: $fileName")
+                return@withContext MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
+            }
+
+            // Create temp file with only the header for analysis
+            val tempFile = File(cacheDir, "lightweight_${System.currentTimeMillis()}_$fileName")
+            try {
+                tempFile.writeBytes(headerBuffer.copyOf(bytesRead))
+
+                // Perform basic checks
+                val hasComplete = checkCompleteMetadataLightweight(tempFile)
+
+                // Check for lyrics in the header (even though it's lightweight)
+                val hasLyrics = checkLyricsLightweight(tempFile)
+
+                // For cover art, we assume false in lightweight mode since cover data is usually at the end
+                // But we should be more careful about this assumption
+                val hasCover = false
+
+                // Read basic tags
+                val tags = try {
+                    val audio = AudioFileIO.read(tempFile)
+                    val tag = audio.tagOrCreateAndSetDefault
+                    MusicMetadata(
+                        title = tag.getFirst(FieldKey.TITLE) ?: "",
+                        artist = tag.getFirst(FieldKey.ARTIST) ?: "",
+                        album = tag.getFirst(FieldKey.ALBUM) ?: ""
+                    )
+                } catch (e: Exception) {
+                    MusicMetadata("", "", "")
+                }
+
+                MetadataAnalysisResult(hasComplete, hasLyrics, hasCover, tags)
+
+            } finally {
+                tempFile.delete()
+            }
+
+        } catch (e: Exception) {
+            logger.e("Error in lightweight metadata analysis for $fileName", e)
+            MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
         }
     }
 
@@ -212,6 +351,58 @@ object AudioMetadataProcessor {
     }
 
 
-    // Removed redundant InputStream methods to encourage efficient temp file usage via analyzeMetadata
+    /**
+     * Lightweight version of complete metadata check for large files
+     */
+    private fun checkCompleteMetadataLightweight(audioFile: File): Boolean {
+        return try {
+            val audio = AudioFileIO.read(audioFile)
+            val tag = audio.tag ?: return false
 
+            val title = tag.getFirst(FieldKey.TITLE)
+            val artist = tag.getFirst(FieldKey.ARTIST)
+            val album = tag.getFirst(FieldKey.ALBUM)
+
+            !title.isNullOrBlank() && !artist.isNullOrBlank() && !album.isNullOrBlank()
+        } catch (e: Exception) {
+            logger.w("Failed to read metadata from ${audioFile.name}", e)
+            false
+        }
+    }
+
+    /**
+     * Lightweight version of lyrics check for large files
+     */
+    private fun checkLyricsLightweight(audioFile: File): Boolean {
+        return try {
+            val audio = AudioFileIO.read(audioFile)
+            val tag = audio.tag ?: return false
+
+            val lyrics = tag.getFirst(FieldKey.LYRICS)
+            !lyrics.isNullOrBlank() && lyrics.trim().length > 10 // Ensure meaningful lyrics content
+        } catch (e: Exception) {
+            logger.w("Failed to check lyrics in ${audioFile.name}", e)
+            false
+        }
+    }
+}
+
+/**
+ * Extension function to copy input stream with progress callback
+ */
+private fun InputStream.copyToWithProgress(
+    out: OutputStream,
+    bufferSize: Int = 8192,
+    progressCallback: (Long) -> Unit = {}
+): Long {
+    var bytesCopied: Long = 0
+    val buffer = ByteArray(bufferSize)
+    var bytes = read(buffer)
+    while (bytes >= 0) {
+        out.write(buffer, 0, bytes)
+        bytesCopied += bytes
+        progressCallback(bytesCopied)
+        bytes = read(buffer)
+    }
+    return bytesCopied
 }
