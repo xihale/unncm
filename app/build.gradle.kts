@@ -3,18 +3,84 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+fun stageWeight(stage: String): Int? = when (stage.lowercase()) {
+    "alpha" -> 1
+    "beta" -> 3
+    "rc" -> 5
+    "release" -> 9
+    else -> null
+}
+
+fun parseTagToCode(tag: String): Int? {
+    val match = Regex("^v(\\d+)\\.(\\d+)\\.(\\d+)-([A-Za-z]+)\\.(\\d+)$").matchEntire(tag) ?: return null
+    val (majorPart, minorPart, patchPart, stagePart, sequencePart) = match.destructured
+    val major = majorPart.toIntOrNull() ?: return null
+    val minor = minorPart.toIntOrNull() ?: return null
+    val patch = patchPart.toIntOrNull() ?: return null
+    val sequence = sequencePart.toIntOrNull() ?: return null
+    val stage = stageWeight(stagePart) ?: return null
+    return major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 100 + sequence
+}
+
+fun runGit(project: org.gradle.api.Project, vararg args: String): String? = try {
+    project.providers.exec {
+        workingDir = project.rootProject.projectDir
+        commandLine(*args)
+    }.standardOutput.asText.get().trim().ifBlank { null }
+} catch (_: Exception) {
+    null
+}
+
+fun getGitVersionCode(project: org.gradle.api.Project): Int {
+    val tags = runGit(project, "git", "tag", "--list", "v*")
+        ?.lineSequence()
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.toList()
+        .orEmpty()
+
+    val bestTag = tags.mapNotNull { tag ->
+        parseTagToCode(tag)?.let { code -> tag to code }
+    }.maxByOrNull { (_, code) -> code } ?: return 1
+
+    val distance = runGit(project, "git", "rev-list", "--count", "${bestTag.first}..HEAD")?.toIntOrNull() ?: return 1
+    return bestTag.second + minOf(distance, 99)
+}
+
+fun getGitVersionName(project: org.gradle.api.Project): String {
+    val script = project.rootProject.projectDir.resolve("git_version.sh")
+    if (!script.exists()) {
+        return "0.0.0-fallback"
+    }
+    return runGit(project, "bash", script.absolutePath) ?: "0.0.0-fallback"
+}
+
 android {
     namespace = "top.xihale.unncm"
     compileSdk = 34
+
+    val releaseStoreFilePath = System.getenv("UNNCM_RELEASE_STORE_FILE") ?: "/home/xihale/.ssh/android/unncm.jks"
+    val releaseStorePassword = System.getenv("UNNCM_RELEASE_STORE_PASSWORD") ?: ""
+    val releaseKeyPassword = System.getenv("UNNCM_RELEASE_KEY_PASSWORD") ?: releaseStorePassword
+    val releaseKeyAlias = System.getenv("UNNCM_RELEASE_KEY_ALIAS") ?: "unncm"
 
     defaultConfig {
         applicationId = "top.xihale.unncm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = getGitVersionCode(project)
+        versionName = getGitVersionName(project)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(releaseStoreFilePath)
+            keyAlias = releaseKeyAlias
+            storePassword = releaseStorePassword
+            keyPassword = releaseKeyPassword
+        }
     }
 
     buildTypes {
@@ -25,6 +91,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
