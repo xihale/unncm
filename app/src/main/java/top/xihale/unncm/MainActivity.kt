@@ -1,10 +1,12 @@
 package top.xihale.unncm
 
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -46,6 +48,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_INPUT_PATH = "input_path"
         private const val KEY_SOURCE_MODE = "source_mode"
         private const val KEY_PENDING_FILES_JSON = "pending_files_json"
+        private const val KEY_LAST_FILE_PICKER_URI = "last_file_picker_uri"
     }
 
     private val logger = Logger.withTag("MainActivity")
@@ -59,6 +62,18 @@ class MainActivity : AppCompatActivity() {
     private var sourceMode: SourceMode = SourceMode.NONE
     private var isRestoringState: Boolean = false
     private var folderScanInFlight: Boolean = false
+    private val ncmPickerMimeTypes = arrayOf("application/octet-stream")
+
+    private inner class OpenNcmDocumentsContract : ActivityResultContracts.OpenMultipleDocuments() {
+        override fun createIntent(context: Context, input: Array<String>): Intent {
+            return super.createIntent(context, input).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                resolveInitialFilePickerUri()?.let { initialUri ->
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+                }
+            }
+        }
+    }
 
     private val openDocumentTreeLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
@@ -92,8 +107,11 @@ class MainActivity : AppCompatActivity() {
         }
 
     private val openMultipleFilesLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        registerForActivityResult(OpenNcmDocumentsContract()) { uris: List<Uri> ->
             if (uris.isEmpty()) {
+                if (viewModel.conversionStatus.value is ConversionUiState.Idle) {
+                    renderIdleStatus(viewModel.pendingFiles.value.size)
+                }
                 return@registerForActivityResult
             }
 
@@ -125,6 +143,9 @@ class MainActivity : AppCompatActivity() {
 
             if (selectedFiles.isEmpty()) {
                 Toast.makeText(this, getString(R.string.msg_no_ncm_files_selected), Toast.LENGTH_SHORT).show()
+                if (viewModel.conversionStatus.value is ConversionUiState.Idle) {
+                    renderIdleStatus(viewModel.pendingFiles.value.size)
+                }
                 return@registerForActivityResult
             }
 
@@ -135,6 +156,7 @@ class MainActivity : AppCompatActivity() {
 
             sourceMode = SourceMode.FILES
             persistSourceMode(sourceMode)
+            persistLastFilePickerUri(selectedFiles.first().uri)
             viewModel.setInputDir(null)
             viewModel.setOutputDir(outputDir)
             viewModel.setPendingFiles(selectedFiles)
@@ -194,7 +216,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupButtons() {
         binding.btnPickFiles.setOnClickListener {
-            openMultipleFilesLauncher.launch(arrayOf("*/*"))
+            binding.btnPickFiles.isEnabled = false
+            binding.root.post {
+                openMultipleFilesLauncher.launch(ncmPickerMimeTypes)
+                binding.btnPickFiles.isEnabled = true
+            }
         }
 
         binding.btnPickFolder.setOnClickListener {
@@ -370,6 +396,9 @@ class MainActivity : AppCompatActivity() {
         sourceMode = SourceMode.FILES
         folderScanInFlight = false
         persistSourceMode(sourceMode)
+        restoredFiles.firstOrNull()?.let { file ->
+            persistLastFilePickerUri(file.uri)
+        }
         viewModel.setInputDir(null)
         viewModel.setOutputDir(outputDir)
         viewModel.setPendingFiles(restoredFiles)
@@ -444,6 +473,28 @@ class MainActivity : AppCompatActivity() {
         return viewModel.inputDir.value?.uri
     }
 
+    private fun resolveInitialFilePickerUri(): Uri? {
+        val prefs = settingsPrefs()
+        val candidateValues = listOf(
+            prefs.getString(KEY_LAST_FILE_PICKER_URI, null),
+            prefs.getString(KEY_INPUT_URI, null)
+        )
+
+        candidateValues.forEach { rawValue ->
+            if (rawValue.isNullOrBlank()) {
+                return@forEach
+            }
+
+            try {
+                return Uri.parse(rawValue)
+            } catch (e: Exception) {
+                logger.w("Failed to parse initial picker URI: $rawValue", e)
+            }
+        }
+
+        return null
+    }
+
     private fun settingsPrefs(): SharedPreferences {
         return getSharedPreferences(PREF_SETTINGS, MODE_PRIVATE)
     }
@@ -458,6 +509,12 @@ class MainActivity : AppCompatActivity() {
         settingsPrefs().edit {
             putString(KEY_INPUT_URI, uri.toString())
             putString(KEY_SOURCE_MODE, SourceMode.FOLDER.name)
+        }
+    }
+
+    private fun persistLastFilePickerUri(uri: Uri) {
+        settingsPrefs().edit {
+            putString(KEY_LAST_FILE_PICKER_URI, uri.toString())
         }
     }
 
