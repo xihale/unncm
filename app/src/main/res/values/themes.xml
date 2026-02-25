@@ -1,8 +1,47 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.unNCM" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnPrimary">@color/brand_on_primary</item>
+        <item name="colorPrimaryContainer">@color/brand_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/brand_on_primary_container</item>
+
+        <item name="colorSecondary">@color/brand_secondary</item>
+        <item name="colorOnSecondary">@color/brand_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/brand_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/brand_on_secondary_container</item>
+
+        <item name="colorSurface">@color/brand_surface</item>
+        <item name="colorOnSurface">@color/brand_on_surface</item>
+        <item name="colorSurfaceVariant">@color/brand_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/brand_on_surface_variant</item>
+        <item name="colorOutline">@color/brand_outline</item>
+        <item name="colorOutlineVariant">@color/brand_outline_variant</item>
+
+        <item name="colorError">@color/brand_error</item>
+        <item name="colorOnError">@color/brand_on_error</item>
+        <item name="colorErrorContainer">@color/brand_error_container</item>
+        <item name="colorOnErrorContainer">@color/brand_on_error_container</item>
+
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.unNCM.Small</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.unNCM.Medium</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.unNCM.Large</item>
     </style>
 
     <style name="Theme.unNCM" parent="Base.Theme.unNCM" />
+
+    <style name="ShapeAppearance.unNCM.Small" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">8dp</item>
+    </style>
+
+    <style name="ShapeAppearance.unNCM.Medium" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">16dp</item>
+    </style>
+
+    <style name="ShapeAppearance.unNCM.Large" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">24dp</item>
+    </style>
 </resources>

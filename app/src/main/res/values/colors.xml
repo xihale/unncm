@@ -1,10 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <color name="brand_primary">#3556DA</color>
+    <color name="brand_on_primary">#FFFFFFFF</color>
+    <color name="brand_primary_container">#DEE4FF</color>
+    <color name="brand_on_primary_container">#0D1A4A</color>
+
+    <color name="brand_secondary">#5D5F72</color>
+    <color name="brand_on_secondary">#FFFFFFFF</color>
+    <color name="brand_secondary_container">#E2E1F9</color>
+    <color name="brand_on_secondary_container">#1A1B2B</color>
+
+    <color name="brand_surface_tint">#3556DA</color>
+    <color name="brand_surface">#FCF8FF</color>
+    <color name="brand_on_surface">#1B1B21</color>
+    <color name="brand_surface_variant">#E3E1EC</color>
+    <color name="brand_on_surface_variant">#46464F</color>
+    <color name="brand_outline">#767680</color>
+    <color name="brand_outline_variant">#C7C5D0</color>
+
+    <color name="brand_error">#BA1A1A</color>
+    <color name="brand_on_error">#FFFFFF</color>
+    <color name="brand_error_container">#FFDAD6</color>
+    <color name="brand_on_error_container">#410002</color>
 </resources>

@@ -1,6 +1,7 @@
 package top.xihale.unncm
 
 import android.app.Application
+import android.os.Looper
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
@@ -65,8 +66,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setOutputDir(documentFile: DocumentFile?) {
-        viewModelScope.launch(Dispatchers.Main) {
-            _outputDir.value = documentFile.also { logger.d("Output document file set: ${it?.name}") }
+        val target = documentFile.also { logger.d("Output document file set: ${it?.name}") }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            _outputDir.value = target
+        } else {
+            _outputDir.postValue(target)
         }
     }
 
@@ -82,6 +86,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 logger.d("Removed pending file: ${file.fileName}")
             }
         }
+    }
+
+    fun removePendingFiles(files: List<UiFile>) {
+        if (files.isEmpty()) return
+        val targetUris = files.map { it.uri }.toSet()
+        _pendingFiles.update { currentList ->
+            currentList.filterNot { targetUris.contains(it.uri) }
+        }
+        logger.d("Removed ${files.size} pending files by selection")
     }
 
     fun clearPendingFiles() {
@@ -214,17 +227,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun convertFiles(maxThreads: Int, cacheDir: File) {
+    fun convertFiles(maxThreads: Int, cacheDir: File, selectedFiles: List<UiFile>? = null) {
         if (_conversionStatus.value is ConversionUiState.Converting) return
 
         val inputDir = _inputDir.value
         var outputDir = _outputDir.value
         val pendingFiles = _pendingFiles.value
+        val filesToProcess = if (!selectedFiles.isNullOrEmpty()) selectedFiles else pendingFiles
 
         // Early validation and setup
         outputDir = ensureOutputDirectory(outputDir, inputDir) ?: return
 
-        if (pendingFiles.isEmpty()) {
+        if (filesToProcess.isEmpty()) {
             _conversionStatus.value =
                 ConversionUiState.Error(getApplication<Application>().getString(R.string.no_files_found))
             return
@@ -240,7 +254,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 processFilesConcurrently(
                     fileConverter,
-                    pendingFiles,
+                    filesToProcess,
                     optimalThreads
                 )
                 setConversionStatus(ConversionUiState.Completed)

@@ -1,28 +1,52 @@
 package top.xihale.unncm
 
 import android.content.Intent
+import android.content.SharedPreferences
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
-import android.widget.SeekBar
-import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.documentfile.provider.DocumentFile
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.lifecycle.Observer
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.edit
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.color.DynamicColors
+import com.google.android.material.slider.Slider
 import kotlinx.coroutines.launch
 import top.xihale.unncm.databinding.ActivityMainBinding
 import top.xihale.unncm.utils.Logger
-import com.google.android.material.color.DynamicColors
 import java.io.File
-
-import androidx.core.view.WindowCompat
-import android.graphics.Color
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.edit
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
+
+    private enum class SourceMode {
+        NONE,
+        FILES,
+        FOLDER;
+
+        companion object {
+            fun fromStored(value: String?): SourceMode {
+                return values().firstOrNull { it.name == value } ?: NONE
+            }
+        }
+    }
+
+    companion object {
+        private const val PREF_SETTINGS = "settings"
+        private const val KEY_INPUT_URI = "input_uri"
+        private const val KEY_INPUT_PATH = "input_path"
+        private const val KEY_SOURCE_MODE = "source_mode"
+        private const val KEY_PENDING_FILES_JSON = "pending_files_json"
+    }
 
     private val logger = Logger.withTag("MainActivity")
 
@@ -30,252 +54,535 @@ class MainActivity : AppCompatActivity() {
     private val viewModel: MainViewModel by viewModels()
     private lateinit var adapter: FileAdapter
 
-    private val INPUT_FOLDER_REQUEST_CODE = 101
-
-    private val openDocumentTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
-        logger.d("Folder picker result received: $uri")
-        if (uri == null) {
-            logger.d("Folder picker cancelled")
-            return@registerForActivityResult
-        }
-
-        try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-
-            val inputDir = DocumentFile.fromTreeUri(this, uri)
-            logger.i("Selected folder: ${inputDir?.name}, URI: $uri, isDirectory: ${inputDir?.isDirectory}")
-
-            if (inputDir == null) {
-                logger.w("DocumentFile.fromTreeUri returned null for URI: $uri")
-                return@registerForActivityResult
-            }
-
-            if (currentFolderRequestCode != INPUT_FOLDER_REQUEST_CODE) {
-                logger.w("Invalid request code: $currentFolderRequestCode")
-                return@registerForActivityResult
-            }
-
-            logger.i("Setting input folder: $uri")
-
-            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-            prefs.edit { putString("input_uri", uri.toString()) }
-
-            viewModel.setInputDir(inputDir)
-
-            viewModel.scanFiles()
-        } catch (e: Exception) {
-            logger.e("Error handling folder selection", e)
-            Toast.makeText(this, "Error setting folder: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
+    private val inputFolderRequestCode = 101
     private var currentFolderRequestCode: Int = 0
+    private var sourceMode: SourceMode = SourceMode.NONE
+    private var isRestoringState: Boolean = false
+    private var folderScanInFlight: Boolean = false
+
+    private val openDocumentTreeLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+            logger.d("Folder picker result received: $uri")
+            if (uri == null) {
+                return@registerForActivityResult
+            }
+
+            try {
+                if (!tryPersistTreeReadWritePermission(uri)) {
+                    Toast.makeText(this, getString(R.string.msg_permission_denied), Toast.LENGTH_SHORT).show()
+                    return@registerForActivityResult
+                }
+
+                val inputDir = DocumentFile.fromTreeUri(this, uri)
+                if (inputDir == null || currentFolderRequestCode != inputFolderRequestCode) {
+                    return@registerForActivityResult
+                }
+
+                sourceMode = SourceMode.FOLDER
+                persistSourceMode(sourceMode)
+                persistFolderSelection(uri)
+                folderScanInFlight = true
+                viewModel.setOutputDir(null)
+                viewModel.setInputDir(inputDir)
+                viewModel.scanFiles()
+            } catch (e: Exception) {
+                logger.e("Error handling folder selection", e)
+                Toast.makeText(this, "Error setting folder: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    private val openMultipleFilesLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+            if (uris.isEmpty()) {
+                return@registerForActivityResult
+            }
+
+            var skippedPermissionCount = 0
+            val selectedFiles = uris.mapNotNull { uri ->
+                val fileName = DocumentFile.fromSingleUri(this, uri)?.name
+                    ?: uri.lastPathSegment?.substringAfterLast('/')
+                    ?: return@mapNotNull null
+
+                if (!fileName.endsWith(".ncm", ignoreCase = true)) {
+                    return@mapNotNull null
+                }
+
+                if (!tryPersistDocumentPermission(uri)) {
+                    skippedPermissionCount += 1
+                    return@mapNotNull null
+                }
+
+                UiFile(uri = uri, fileName = fileName)
+            }
+
+            if (skippedPermissionCount > 0) {
+                Toast.makeText(
+                    this,
+                    getString(R.string.msg_files_skipped_not_persisted, skippedPermissionCount),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+            if (selectedFiles.isEmpty()) {
+                Toast.makeText(this, getString(R.string.msg_no_ncm_files_selected), Toast.LENGTH_SHORT).show()
+                return@registerForActivityResult
+            }
+
+            val outputDir = ensureDirectPickOutputDirectory() ?: run {
+                Toast.makeText(this, getString(R.string.msg_create_output_fail), Toast.LENGTH_LONG).show()
+                return@registerForActivityResult
+            }
+
+            sourceMode = SourceMode.FILES
+            persistSourceMode(sourceMode)
+            viewModel.setInputDir(null)
+            viewModel.setOutputDir(outputDir)
+            viewModel.setPendingFiles(selectedFiles)
+            viewModel.resetConversionStatus()
+            persistPendingFileSelection(selectedFiles)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        logger.i("MainActivity onCreate started")
         super.onCreate(savedInstanceState)
-        try {
-            WindowCompat.setDecorFitsSystemWindows(window, false)
-            window.statusBarColor = Color.TRANSPARENT
-            DynamicColors.applyToActivityIfAvailable(this)
-            binding = ActivityMainBinding.inflate(layoutInflater)
-            setContentView(binding.root)
 
-            logger.d("UI setup completed")
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        DynamicColors.applyToActivityIfAvailable(this)
 
-            adapter = FileAdapter(mutableListOf())
-            binding.recyclerView.layoutManager = LinearLayoutManager(this)
-            binding.recyclerView.adapter = adapter
-            logger.d("RecyclerView adapter initialized")
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-            setupButtons()
-            setupViewModelObservers()
+        applySystemInsets()
 
-            // Restore path from SharedPreferences and setup UI
-            logger.d("Attempting to restore path from prefs")
-            val pathSet = setupDefaultPaths()
-            if (pathSet) {
-                logger.d("Path restored successfully from prefs")
-                // Since setupDefaultPaths already set the inputDocumentFile, check if we need to trigger scan
-                if (viewModel.pendingFiles.value.isNullOrEmpty()) {
-                    logger.d("No pending files found after path restoration, triggering scan")
-                    viewModel.scanFiles()
+        adapter = FileAdapter(mutableListOf())
+        binding.recyclerView.layoutManager = LinearLayoutManager(this)
+        binding.recyclerView.adapter = adapter
+
+        isRestoringState = true
+        setupButtons()
+        setupObservers()
+
+        val restored = restoreSessionState()
+        isRestoringState = false
+        if (restored) {
+            if (sourceMode == SourceMode.FOLDER && viewModel.pendingFiles.value.isEmpty()) {
+                folderScanInFlight = true
+                viewModel.scanFiles()
+            } else if (sourceMode == SourceMode.FOLDER) {
+                clearPersistedPendingFileSelection()
+            }
+        }
+
+        renderIdleStatus(viewModel.pendingFiles.value.size)
+        updateEmptyState(viewModel.pendingFiles.value.size, viewModel.conversionStatus.value)
+        binding.tvThreadLabel.text = getString(R.string.label_threads, binding.sliderThreads.value.toInt())
+    }
+
+    private fun applySystemInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val topBase = resources.getDimensionPixelSize(R.dimen.space_md)
+            val bottomBase = resources.getDimensionPixelSize(R.dimen.space_md)
+            view.updatePadding(
+                top = topBase + systemBars.top,
+                bottom = bottomBase + systemBars.bottom
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
+    }
+
+    private fun setupButtons() {
+        binding.btnPickFiles.setOnClickListener {
+            openMultipleFilesLauncher.launch(arrayOf("*/*"))
+        }
+
+        binding.btnPickFolder.setOnClickListener {
+            openFolderPicker(inputFolderRequestCode)
+        }
+
+        binding.sliderThreads.addOnChangeListener(
+            object : Slider.OnChangeListener {
+                override fun onValueChange(slider: Slider, value: Float, fromUser: Boolean) {
+                    if (fromUser) {
+                        binding.tvThreadLabel.text = getString(R.string.label_threads, value.toInt())
+                    }
                 }
-            } else {
-                // No path set, prompt user to select folder
-                Toast.makeText(this, getString(R.string.msg_select_input_dir), Toast.LENGTH_LONG).show()
-                openFolderPicker(INPUT_FOLDER_REQUEST_CODE)
+            }
+        )
+
+        binding.btnConvert.setOnClickListener {
+            val pendingFilesList = viewModel.pendingFiles.value
+            if (pendingFilesList.isEmpty()) {
+                Toast.makeText(this, getString(R.string.no_files_found), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
 
-            logger.i("MainActivity onCreate completed successfully")
-        } catch (e: Exception) {
-            logger.e("Error in MainActivity onCreate", e)
-            Toast.makeText(this, "Initialization failed: ${e.message}", Toast.LENGTH_LONG).show()
+            val maxThreads = binding.sliderThreads.value.toInt()
+            viewModel.convertFiles(maxThreads, cacheDir)
         }
     }
 
-    private fun setupViewModelObservers() {
-        // Observe pending files changes (StateFlow)
+    private fun setupObservers() {
         lifecycleScope.launch {
             viewModel.pendingFiles.collect { files ->
                 adapter.updateList(files)
-                // Only update status text if we are not currently scanning (Converting state uses button for status)
-                val currentState = viewModel.conversionStatus.value
-                if (currentState !is ConversionUiState.Scanning) {
-                    binding.tvStatus.text = files.size.toString()
+                if (!isRestoringState) {
+                    if (sourceMode == SourceMode.FILES) {
+                        persistPendingFileSelection(files)
+                    }
                 }
-                logger.d("Pending files updated in UI: ${files.size} files")
+                if (viewModel.conversionStatus.value is ConversionUiState.Idle) {
+                    renderIdleStatus(files.size)
+                }
+                updateEmptyState(files.size, viewModel.conversionStatus.value)
             }
         }
 
-        // Observe input document file changes
-        viewModel.inputDir.observe(this, Observer { docFile ->
-            docFile?.let {
-                binding.inputFolderEditText.setText(it.uri.toString())
-                logger.d("Input document file updated in UI: ${it.name}")
-            }
-        })
-
-        // Observe conversion status
-        viewModel.conversionStatus.observe(this, Observer { state ->
+        viewModel.conversionStatus.observe(this) { state ->
             when (state) {
                 is ConversionUiState.Idle -> {
                     binding.btnConvert.isEnabled = true
                     binding.btnConvert.text = getString(R.string.convert_button)
-                    val count = viewModel.pendingFiles.value?.size ?: 0
-                    binding.tvStatus.text = count.toString()
+                    if (sourceMode == SourceMode.FOLDER && folderScanInFlight) {
+                        clearPersistedPendingFileSelection()
+                        folderScanInFlight = false
+                    }
+                    renderIdleStatus(viewModel.pendingFiles.value.size)
                 }
+
                 is ConversionUiState.Scanning -> {
                     binding.btnConvert.isEnabled = false
+                    binding.btnConvert.text = getString(R.string.status_scanning)
                     binding.tvStatus.text = getString(R.string.status_scanning)
                 }
+
                 is ConversionUiState.Converting -> {
                     binding.btnConvert.isEnabled = false
                     binding.btnConvert.text = getString(R.string.status_converting)
+                    binding.tvStatus.text = getString(R.string.status_converting)
                 }
+
                 is ConversionUiState.Completed -> {
                     binding.btnConvert.isEnabled = true
                     binding.btnConvert.text = getString(R.string.convert_button)
+                    binding.tvStatus.text = getString(R.string.status_done)
                     Toast.makeText(this, getString(R.string.msg_convert_complete), Toast.LENGTH_SHORT).show()
                     viewModel.resetConversionStatus()
                 }
+
                 is ConversionUiState.Error -> {
                     binding.btnConvert.isEnabled = true
                     binding.btnConvert.text = getString(R.string.convert_button)
+                    binding.tvStatus.text = getString(R.string.status_failed)
+                    if (folderScanInFlight && sourceMode == SourceMode.FOLDER) {
+                        folderScanInFlight = false
+                        val restored = restorePendingFileSelection(settingsPrefs())
+                        if (restored) {
+                            Toast.makeText(
+                                this,
+                                getString(R.string.msg_folder_scan_failed_restore_files),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                     Toast.makeText(this, state.message, Toast.LENGTH_LONG).show()
                     viewModel.resetConversionStatus()
                 }
             }
-        })
+
+            updateEmptyState(viewModel.pendingFiles.value.size, state)
+        }
     }
 
-    private fun setupDefaultPaths(): Boolean {
-        logger.d("Setting up default paths")
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val savedInputUri = prefs.getString("input_uri", null)
-        val savedInputPath = prefs.getString("input_path", null) // Fallback for legacy
+    override fun onStop() {
+        super.onStop()
+        if (!isRestoringState && sourceMode == SourceMode.FILES) {
+            persistPendingFileSelection(viewModel.pendingFiles.value)
+        }
+    }
 
-        logger.d("Saved input URI: $savedInputUri, saved input path: $savedInputPath")
+    private fun renderIdleStatus(totalCount: Int) {
+        binding.tvStatus.text = when (sourceMode) {
+            SourceMode.NONE -> getString(R.string.status_idle_summary)
+            SourceMode.FILES -> getString(R.string.status_files_selected, totalCount)
+            SourceMode.FOLDER -> getString(R.string.status_folder_selected, totalCount)
+        }
+    }
+
+    private fun ensureDirectPickOutputDirectory(): DocumentFile? {
+        val baseDir = getExternalFilesDir(null) ?: filesDir
+        val unlockedDir = File(baseDir, "unlocked")
+        if (!unlockedDir.exists() && !unlockedDir.mkdirs()) {
+            logger.e("Failed to create direct-pick output dir: ${unlockedDir.absolutePath}")
+            return null
+        }
+        return DocumentFile.fromFile(unlockedDir)
+    }
+
+    private fun updateEmptyState(totalCount: Int, state: ConversionUiState?) {
+        val isBusy = state is ConversionUiState.Scanning || state is ConversionUiState.Converting
+        val showEmpty = totalCount == 0 && !isBusy
+        binding.emptyStateContainer.visibility = if (showEmpty) android.view.View.VISIBLE else android.view.View.GONE
+        binding.recyclerView.visibility = if (showEmpty) android.view.View.INVISIBLE else android.view.View.VISIBLE
+    }
+
+    private fun restoreSessionState(): Boolean {
+        val prefs = settingsPrefs()
+        val storedMode = prefs.getString(KEY_SOURCE_MODE, null)
+
+        val restored = if (storedMode == null) {
+            restorePendingFileSelection(prefs) || restoreFolderSelection(prefs)
+        } else {
+            when (SourceMode.fromStored(storedMode)) {
+                SourceMode.FILES -> restorePendingFileSelection(prefs)
+                SourceMode.FOLDER -> restoreFolderSelection(prefs) || restorePendingFileSelection(prefs)
+                SourceMode.NONE -> false
+            }
+        }
+
+        if (!restored) {
+            sourceMode = SourceMode.NONE
+            persistSourceMode(sourceMode)
+        }
+        return restored
+    }
+
+    private fun restorePendingFileSelection(prefs: SharedPreferences): Boolean {
+        val json = prefs.getString(KEY_PENDING_FILES_JSON, null)
+        if (json.isNullOrBlank()) {
+            return false
+        }
+
+        val restoredFiles = parsePendingFiles(json)
+            .filter { uiFile -> canAccessPersistedUri(uiFile.uri) }
+
+        if (restoredFiles.isEmpty()) {
+            clearPersistedPendingFileSelection()
+            return false
+        }
+
+        val outputDir = ensureDirectPickOutputDirectory() ?: run {
+            logger.e("Failed to restore pending file selection: no output directory")
+            return false
+        }
+
+        sourceMode = SourceMode.FILES
+        folderScanInFlight = false
+        persistSourceMode(sourceMode)
+        viewModel.setInputDir(null)
+        viewModel.setOutputDir(outputDir)
+        viewModel.setPendingFiles(restoredFiles)
+        viewModel.resetConversionStatus()
+        persistPendingFileSelection(restoredFiles)
+        return true
+    }
+
+    private fun restoreFolderSelection(prefs: SharedPreferences): Boolean {
+        val savedInputUri = prefs.getString(KEY_INPUT_URI, null)
+        val savedInputPath = prefs.getString(KEY_INPUT_PATH, null)
 
         if (savedInputUri != null) {
-            logger.i("Restoring input folder from saved URI")
             val uri = Uri.parse(savedInputUri)
             try {
-                val persistedUriPermissions = contentResolver.persistedUriPermissions
-                val hasPermission = persistedUriPermissions.any { it.uri == uri }
-
-                if (!hasPermission) {
-                    try {
-                        contentResolver.takePersistableUriPermission(
-                            uri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        )
-                    } catch (e: SecurityException) {
-                        logger.e("Failed to restore persistent permission", e)
-                        prefs.edit().remove("input_uri").apply()
-                        // Fallthrough to check legacy path or return false
+                if (!hasPersistedTreeReadWritePermission(uri)) {
+                    val persisted = tryPersistTreeReadWritePermission(uri)
+                    if (!persisted || !hasPersistedTreeReadWritePermission(uri)) {
+                        logger.e("Failed to restore read/write tree permission for $uri")
+                        prefs.edit().remove(KEY_INPUT_URI).apply()
+                        return false
                     }
                 }
 
-                // If permission is now okay (or was okay), check the file
                 DocumentFile.fromTreeUri(this, uri)?.takeIf { it.exists() }?.let { docFile ->
+                    sourceMode = SourceMode.FOLDER
+                    persistSourceMode(sourceMode)
                     viewModel.setInputDir(docFile)
-                    logger.i("Successfully restored input folder: ${docFile.name}")
                     return true
                 }
 
-                logger.w("DocumentFile validation failed for URI: $uri")
-                // Clear invalid URI
-                prefs.edit().remove("input_uri").apply()
-
+                prefs.edit().remove(KEY_INPUT_URI).apply()
             } catch (e: Exception) {
                 logger.w("Failed to restore saved input URI", e)
             }
         }
 
         if (savedInputPath != null) {
-            logger.i("Restoring input folder from saved path (legacy)")
-            
             File(savedInputPath).takeIf { it.exists() && it.isDirectory }?.let { file ->
                 val docFile = DocumentFile.fromFile(file)
+                sourceMode = SourceMode.FOLDER
+                persistSourceMode(sourceMode)
                 viewModel.setInputDir(docFile)
-                logger.i("Successfully restored input path: $savedInputPath")
                 return true
             }
-            
-            logger.w("Legacy input path does not exist or is not a directory: $savedInputPath")
-            // Clear invalid legacy path
-            prefs.edit().remove("input_path").apply()
+            prefs.edit().remove(KEY_INPUT_PATH).apply()
         }
 
         return false
     }
 
-    private fun setupButtons() {
-        logger.d("Setting up button listeners")
-
-        binding.inputFolderLayout.setEndIconOnClickListener {
-            logger.d("Input folder button clicked")
-            openFolderPicker(INPUT_FOLDER_REQUEST_CODE)
-        }
-
-        binding.seekBarThreads.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                binding.tvThreadLabel.text = getString(R.string.label_threads, progress + 1)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        binding.btnConvert.setOnClickListener {
-            logger.d("Convert button clicked")
-            val pendingFilesList = viewModel.pendingFiles.value
-            if (!pendingFilesList.isNullOrEmpty()) {
-                logger.i("Starting conversion of ${pendingFilesList.size} files")
-                val maxThreads = binding.seekBarThreads.progress + 1
-                viewModel.convertFiles(maxThreads, cacheDir)
-            } else {
-                logger.w("No files to convert")
-                Toast.makeText(this, getString(R.string.no_files_found), Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        logger.d("Button setup completed")
-    }
-
     private fun openFolderPicker(requestCode: Int) {
         currentFolderRequestCode = requestCode
-        logger.d("Opening folder picker with request code: $requestCode")
-        
-        var initialUri: Uri? = null
-        if (requestCode == INPUT_FOLDER_REQUEST_CODE && viewModel.inputDir.value == null) {
-             try {
-                 initialUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fnetease%2Fcloudmusic%2FMusic")
-             } catch (e: Exception) {
-                 // Ignore
-             }
+        val initialUri = if (requestCode == inputFolderRequestCode) {
+            resolveInitialFolderUri()
+        } else {
+            null
         }
-        
         openDocumentTreeLauncher.launch(initialUri)
+    }
+
+    private fun resolveInitialFolderUri(): Uri? {
+        val settingsUri = settingsPrefs().getString(KEY_INPUT_URI, null)
+        if (!settingsUri.isNullOrBlank()) {
+            return try {
+                Uri.parse(settingsUri)
+            } catch (e: Exception) {
+                logger.w("Failed to parse saved input URI", e)
+                null
+            }
+        }
+        return viewModel.inputDir.value?.uri
+    }
+
+    private fun settingsPrefs(): SharedPreferences {
+        return getSharedPreferences(PREF_SETTINGS, MODE_PRIVATE)
+    }
+
+    private fun persistSourceMode(mode: SourceMode) {
+        settingsPrefs().edit {
+            putString(KEY_SOURCE_MODE, mode.name)
+        }
+    }
+
+    private fun persistFolderSelection(uri: Uri) {
+        settingsPrefs().edit {
+            putString(KEY_INPUT_URI, uri.toString())
+            putString(KEY_SOURCE_MODE, SourceMode.FOLDER.name)
+        }
+    }
+
+    private fun persistPendingFileSelection(files: List<UiFile>) {
+        val pendingFiles = files.filter { it.status != FileStatus.DONE }
+        if (pendingFiles.isEmpty()) {
+            settingsPrefs().edit {
+                remove(KEY_PENDING_FILES_JSON)
+                if (sourceMode == SourceMode.FILES) {
+                    putString(KEY_SOURCE_MODE, SourceMode.NONE.name)
+                }
+            }
+            if (sourceMode == SourceMode.FILES) {
+                sourceMode = SourceMode.NONE
+            }
+            return
+        }
+
+        val jsonArray = JSONArray()
+        pendingFiles.forEach { file ->
+            val item = JSONObject().apply {
+                put("uri", file.uri.toString())
+                put("fileName", file.fileName)
+                put("status", file.status.name)
+            }
+            jsonArray.put(item)
+        }
+
+        settingsPrefs().edit {
+            putString(KEY_PENDING_FILES_JSON, jsonArray.toString())
+            putString(KEY_SOURCE_MODE, SourceMode.FILES.name)
+        }
+    }
+
+    private fun clearPersistedPendingFileSelection() {
+        settingsPrefs().edit {
+            remove(KEY_PENDING_FILES_JSON)
+        }
+    }
+
+    private fun parsePendingFiles(serialized: String): List<UiFile> {
+        return try {
+            val array = JSONArray(serialized)
+            val files = mutableListOf<UiFile>()
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val uriRaw = item.optString("uri")
+                val fileName = item.optString("fileName")
+                if (uriRaw.isBlank() || fileName.isBlank()) {
+                    continue
+                }
+
+                val statusName = item.optString("status", FileStatus.PENDING.name)
+                val status = FileStatus.values().firstOrNull { it.name == statusName } ?: FileStatus.PENDING
+                if (status == FileStatus.DONE) {
+                    continue
+                }
+
+                files.add(
+                    UiFile(
+                        uri = Uri.parse(uriRaw),
+                        fileName = fileName,
+                        status = FileStatus.PENDING
+                    )
+                )
+            }
+            files
+        } catch (e: Exception) {
+            logger.w("Failed to parse pending files state", e)
+            emptyList()
+        }
+    }
+
+    private fun canAccessPersistedUri(uri: Uri): Boolean {
+        if (!hasPersistedReadPermission(uri)) {
+            return false
+        }
+        return try {
+            val documentFile = DocumentFile.fromSingleUri(this, uri) ?: return false
+            documentFile.exists()
+        } catch (e: SecurityException) {
+            logger.w("Lost permission for persisted URI: $uri", e)
+            false
+        } catch (e: Exception) {
+            logger.w("Failed checking persisted URI access: $uri", e)
+            false
+        }
+    }
+
+    private fun tryPersistDocumentPermission(uri: Uri): Boolean {
+        val readAndWrite = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        return try {
+            contentResolver.takePersistableUriPermission(uri, readAndWrite)
+            true
+        } catch (e: SecurityException) {
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                true
+            } catch (retryError: SecurityException) {
+                logger.w("Persist URI read permission failed for $uri", retryError)
+                false
+            }
+        }
+    }
+
+    private fun tryPersistTreeReadWritePermission(uri: Uri): Boolean {
+        val readAndWrite = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        return try {
+            contentResolver.takePersistableUriPermission(uri, readAndWrite)
+            true
+        } catch (e: SecurityException) {
+            logger.w("Persist tree read/write permission failed for $uri", e)
+            false
+        }
+    }
+
+    private fun hasPersistedReadPermission(uri: Uri): Boolean {
+        return contentResolver.persistedUriPermissions.any { permission ->
+            permission.uri == uri && permission.isReadPermission
+        }
+    }
+
+    private fun hasPersistedTreeReadWritePermission(uri: Uri): Boolean {
+        return contentResolver.persistedUriPermissions.any { permission ->
+            permission.uri == uri && permission.isReadPermission && permission.isWritePermission
+        }
     }
 }
