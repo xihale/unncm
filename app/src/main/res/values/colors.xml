@@ -1,25 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_primary">#3556DA</color>
-    <color name="brand_on_primary">#FFFFFFFF</color>
-    <color name="brand_primary_container">#DEE4FF</color>
-    <color name="brand_on_primary_container">#0D1A4A</color>
+    <color name="brand_primary">#7FCFD2</color>
+    <color name="brand_on_primary">#041214</color>
+    <color name="brand_primary_container">#173136</color>
+    <color name="brand_on_primary_container">#D6F3F4</color>
 
-    <color name="brand_secondary">#5D5F72</color>
-    <color name="brand_on_secondary">#FFFFFFFF</color>
-    <color name="brand_secondary_container">#E2E1F9</color>
-    <color name="brand_on_secondary_container">#1A1B2B</color>
+    <color name="brand_secondary">#9BC8E2</color>
+    <color name="brand_on_secondary">#07131C</color>
+    <color name="brand_secondary_container">#1B2E3D</color>
+    <color name="brand_on_secondary_container">#DAECF8</color>
 
-    <color name="brand_surface_tint">#3556DA</color>
-    <color name="brand_surface">#FCF8FF</color>
-    <color name="brand_on_surface">#1B1B21</color>
-    <color name="brand_surface_variant">#E3E1EC</color>
-    <color name="brand_on_surface_variant">#46464F</color>
-    <color name="brand_outline">#767680</color>
-    <color name="brand_outline_variant">#C7C5D0</color>
+    <color name="brand_surface_tint">#55D8FF</color>
+    <color name="brand_surface">#070B11</color>
+    <color name="brand_on_surface">#E1EAF4</color>
+    <color name="brand_surface_variant">#0D141E</color>
+    <color name="brand_on_surface_variant">#92A4B7</color>
+    <color name="brand_outline">#233447</color>
+    <color name="brand_outline_variant">#172432</color>
 
-    <color name="brand_error">#BA1A1A</color>
-    <color name="brand_on_error">#FFFFFF</color>
-    <color name="brand_error_container">#FFDAD6</color>
-    <color name="brand_on_error_container">#410002</color>
+    <color name="brand_error">#FF5C7A</color>
+    <color name="brand_on_error">#2A000A</color>
+    <color name="brand_error_container">#4A1020</color>
+    <color name="brand_on_error_container">#FFDCE4</color>
+
+    <color name="tech_bg_top">#05080D</color>
+    <color name="tech_bg_bottom">#070B11</color>
+    <color name="tech_panel">#0C131D</color>
+    <color name="tech_panel_alt">#0E1722</color>
+    <color name="tech_grid_line">#152638</color>
+    <color name="tech_panel_highlight">#1E3245</color>
 </resources>

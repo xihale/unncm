@@ -7,9 +7,9 @@
     <dimen name="space_xl">20dp</dimen>
     <dimen name="space_2xl">24dp</dimen>
 
-    <dimen name="radius_sm">8dp</dimen>
-    <dimen name="radius_md">16dp</dimen>
-    <dimen name="radius_lg">20dp</dimen>
+    <dimen name="radius_sm">0dp</dimen>
+    <dimen name="radius_md">0dp</dimen>
+    <dimen name="radius_lg">0dp</dimen>
 
     <dimen name="list_item_height">72dp</dimen>
 </resources>

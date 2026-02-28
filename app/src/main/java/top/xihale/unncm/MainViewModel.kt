@@ -117,11 +117,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_conversionStatus.value is ConversionUiState.Scanning) return
 
         val inputDir = _inputDir.value
-        logger.d("Input dir check: file=${inputDir?.name}, uri=${inputDir?.uri}, exists=${inputDir?.exists()}")
-
-        // Early validation returns
-        if (inputDir == null || !inputDir.exists()) {
-            logger.e("Input directory invalid or null")
+        if (inputDir == null) {
+            logger.e("Input directory is null")
             _conversionStatus.value =
                 ConversionUiState.Error(getApplication<Application>().getString(R.string.msg_invalid_input_dir))
             return
@@ -133,6 +130,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             clearPendingFiles() // Clear existing list
 
             try {
+                val inputExists = inputDir.exists()
+                if (!inputExists) {
+                    logger.e("Input directory invalid: uri=${inputDir.uri}")
+                    _conversionStatus.postValue(
+                        ConversionUiState.Error(
+                            getApplication<Application>().getString(R.string.msg_invalid_input_dir)
+                        )
+                    )
+                    return@launch
+                }
+
+                logger.d("Input dir check: file=${inputDir.name}, uri=${inputDir.uri}, exists=$inputExists")
+
                 val unlockedDir = setupOutputDirectory(inputDir) ?: return@launch
 
                 logger.i("=== Starting file scan ===")

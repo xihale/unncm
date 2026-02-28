@@ -1,5 +1,4 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
     <style name="Base.Theme.unNCM" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorOnPrimary">@color/brand_on_primary</item>
@@ -23,25 +22,54 @@
         <item name="colorErrorContainer">@color/brand_error_container</item>
         <item name="colorOnErrorContainer">@color/brand_on_error_container</item>
 
-        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.unNCM.Small</item>
-        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.unNCM.Medium</item>
-        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.unNCM.Large</item>
+        <item name="android:windowBackground">@drawable/bg_screen_tech</item>
+
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.unNCM.Sharp</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.unNCM.Sharp</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.unNCM.Sharp</item>
+
+        <item name="materialButtonStyle">@style/Widget.unNCM.Button</item>
+        <item name="materialButtonOutlinedStyle">@style/Widget.unNCM.Button.Outlined</item>
     </style>
 
     <style name="Theme.unNCM" parent="Base.Theme.unNCM" />
 
-    <style name="ShapeAppearance.unNCM.Small" parent="">
+    <style name="ShapeAppearance.unNCM.Sharp" parent="">
         <item name="cornerFamily">rounded</item>
-        <item name="cornerSize">8dp</item>
+        <item name="cornerSize">0dp</item>
     </style>
 
-    <style name="ShapeAppearance.unNCM.Medium" parent="">
-        <item name="cornerFamily">rounded</item>
-        <item name="cornerSize">16dp</item>
+    <style name="Widget.unNCM.Button" parent="Widget.Material3.Button">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.unNCM.Sharp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:letterSpacing">0.02</item>
+        <item name="android:minHeight">46dp</item>
+        <item name="backgroundTint">?attr/colorPrimaryContainer</item>
+        <item name="strokeColor">?attr/colorPrimary</item>
+        <item name="strokeWidth">1dp</item>
     </style>
 
-    <style name="ShapeAppearance.unNCM.Large" parent="">
-        <item name="cornerFamily">rounded</item>
-        <item name="cornerSize">24dp</item>
+    <style name="Widget.unNCM.Button.Primary" parent="Widget.Material3.Button">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.unNCM.Sharp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:letterSpacing">0.01</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="backgroundTint">?attr/colorPrimary</item>
+        <item name="android:textColor">?attr/colorOnPrimary</item>
+        <item name="strokeWidth">0dp</item>
+        <item name="android:elevation">0dp</item>
+    </style>
+
+    <style name="Widget.unNCM.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.unNCM.Sharp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:letterSpacing">0.02</item>
+        <item name="android:minHeight">46dp</item>
+        <item name="backgroundTint">@android:color/transparent</item>
+        <item name="strokeColor">?attr/colorOutline</item>
+        <item name="strokeWidth">1dp</item>
     </style>
 </resources>

@@ -4,6 +4,8 @@ import android.net.Uri
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.annotation.AttrRes
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.MaterialColors
@@ -19,9 +21,7 @@ data class UiFile(
     var status: FileStatus = FileStatus.PENDING
 )
 
-class FileAdapter(
-    private var files: MutableList<UiFile>
-) : RecyclerView.Adapter<FileAdapter.ViewHolder>() {
+class FileAdapter : ListAdapter<UiFile, FileAdapter.ViewHolder>(DIFF_CALLBACK) {
 
     class ViewHolder(val binding: ItemFileBinding) : RecyclerView.ViewHolder(binding.root)
 
@@ -30,7 +30,7 @@ class FileAdapter(
     }
 
     override fun getItemId(position: Int): Long {
-        return files[position].uri.toString().hashCode().toLong()
+        return getItem(position).uri.toString().hashCode().toLong()
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -39,7 +39,7 @@ class FileAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = files[position]
+        val item = getItem(position)
         val context = holder.binding.root.context
         val card = holder.binding.root as MaterialCardView
 
@@ -47,7 +47,7 @@ class FileAdapter(
 
         val extension = item.fileName.substringAfterLast('.', "").uppercase()
         val statusText = when (item.status) {
-            FileStatus.PENDING -> context.getString(R.string.item_meta_pending)
+            FileStatus.PENDING -> null
             FileStatus.CONVERTING -> context.getString(R.string.item_meta_converting)
             FileStatus.DONE -> context.getString(R.string.item_meta_done)
             FileStatus.ERROR -> context.getString(R.string.item_meta_error)
@@ -60,18 +60,26 @@ class FileAdapter(
             FileStatus.ERROR -> color(card, com.google.android.material.R.attr.colorError)
         }
 
-        holder.binding.tvFileMeta.text = if (extension.isBlank()) statusText else "$extension · $statusText"
+        holder.binding.tvFileMeta.text = listOfNotNull(
+            extension.takeIf { it.isNotBlank() },
+            statusText
+        ).joinToString(" · ")
         holder.binding.tvFileMeta.setTextColor(statusColor)
-    }
-
-    override fun getItemCount(): Int = files.size
-
-    fun updateList(newFiles: List<UiFile>) {
-        files = newFiles.toMutableList()
-        notifyDataSetChanged()
     }
 
     private fun color(card: MaterialCardView, @AttrRes attr: Int): Int {
         return MaterialColors.getColor(card, attr)
+    }
+
+    companion object {
+        private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<UiFile>() {
+            override fun areItemsTheSame(oldItem: UiFile, newItem: UiFile): Boolean {
+                return oldItem.uri == newItem.uri
+            }
+
+            override fun areContentsTheSame(oldItem: UiFile, newItem: UiFile): Boolean {
+                return oldItem.fileName == newItem.fileName && oldItem.status == newItem.status
+            }
+        }
     }
 }

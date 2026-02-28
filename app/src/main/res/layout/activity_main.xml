@@ -4,24 +4,49 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?attr/colorSurface"
+    android:background="@drawable/bg_screen_tech"
     android:paddingStart="@dimen/space_lg"
     android:paddingEnd="@dimen/space_lg"
     tools:context=".MainActivity">
+
+    <TextView
+        android:id="@+id/tvHeaderTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:letterSpacing="0.03"
+        android:text="@string/screen_title"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorPrimary"
+        android:textStyle="bold"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <View
+        android:id="@+id/dividerTop"
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_marginTop="@dimen/space_sm"
+        android:background="?attr/colorOutline"
+        app:layout_constraintTop_toBottomOf="@id/tvHeaderTitle"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <LinearLayout
         android:id="@+id/sourceActions"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
+        android:layout_marginTop="@dimen/space_md"
         android:gravity="center_vertical"
-        app:layout_constraintTop_toTopOf="parent"
+        android:orientation="horizontal"
+        app:layout_constraintTop_toBottomOf="@id/dividerTop"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnPickFiles"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.unNCM.Button.Outlined"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -29,7 +54,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnPickFolder"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.unNCM.Button.Outlined"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginStart="@dimen/space_sm"
@@ -42,23 +67,26 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/space_md"
+        android:fontFamily="monospace"
         android:textAppearance="?attr/textAppearanceBodyMedium"
-        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textColor="?attr/colorOnSurface"
         app:layout_constraintTop_toBottomOf="@id/sourceActions"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        tools:text="请选择目录" />
+        tools:text="已选择 12 个 NCM 文件" />
 
     <TextView
         android:id="@+id/tvThreadLabel"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/space_sm"
+        android:fontFamily="monospace"
         android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
         app:layout_constraintTop_toBottomOf="@id/tvStatus"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        tools:text="并发线程：1" />
+        tools:text="Threads: 1" />
 
     <com.google.android.material.slider.Slider
         android:id="@+id/sliderThreads"
@@ -69,16 +97,21 @@
         android:value="1"
         android:valueFrom="1"
         android:valueTo="8"
+        app:haloColor="?attr/colorPrimaryContainer"
+        app:thumbColor="?attr/colorPrimary"
+        app:tickVisible="false"
+        app:trackColorActive="?attr/colorPrimary"
+        app:trackColorInactive="?attr/colorOutline"
         app:layout_constraintTop_toBottomOf="@id/tvThreadLabel"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnConvert"
-        style="@style/Widget.Material3.Button"
+        style="@style/Widget.unNCM.Button.Primary"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/space_md"
+        android:layout_marginTop="@dimen/space_sm"
         android:text="@string/convert_button"
         app:layout_constraintTop_toBottomOf="@id/sliderThreads"
         app:layout_constraintStart_toStartOf="parent"
@@ -89,8 +122,9 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginTop="@dimen/space_md"
+        android:background="@drawable/bg_panel_tech"
         android:clipToPadding="false"
-        android:paddingBottom="@dimen/space_md"
+        android:padding="@dimen/space_sm"
         app:layout_constraintTop_toBottomOf="@id/btnConvert"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -114,14 +148,17 @@
             android:id="@+id/tvEmptyTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:fontFamily="monospace"
             android:text="@string/empty_title"
-            android:textAppearance="?attr/textAppearanceTitleSmall" />
+            android:textAppearance="?attr/textAppearanceTitleSmall"
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@+id/tvEmptyHint"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/space_xs"
+            android:fontFamily="monospace"
             android:gravity="center"
             android:text="@string/empty_hint"
             android:textAppearance="?attr/textAppearanceBodySmall"

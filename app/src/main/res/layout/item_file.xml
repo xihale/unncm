@@ -5,10 +5,10 @@
     android:layout_height="wrap_content"
     android:layout_marginTop="@dimen/space_xs"
     android:layout_marginBottom="@dimen/space_xs"
-    app:cardBackgroundColor="?attr/colorSurface"
-    app:cardCornerRadius="@dimen/radius_md"
+    app:cardBackgroundColor="@color/tech_panel_alt"
+    app:cardCornerRadius="0dp"
     app:cardElevation="0dp"
-    app:strokeColor="?attr/colorOutlineVariant"
+    app:strokeColor="?attr/colorOutline"
     app:strokeWidth="1dp">
 
     <LinearLayout
@@ -26,9 +26,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="end"
+            android:fontFamily="monospace"
             android:maxLines="1"
+            android:text="music_file"
             android:textAppearance="?attr/textAppearanceTitleSmall"
-            android:text="music_file" />
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@+id/tvFileMeta"
@@ -36,10 +38,11 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/space_xs"
             android:ellipsize="end"
+            android:fontFamily="monospace"
             android:maxLines="1"
+            android:text="NCM · 待处理"
             android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:text="NCM · 待处理" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
         <TextView
             android:id="@+id/tvFilePath"
