@@ -12,13 +12,13 @@ fun stageWeight(stage: String): Int? = when (stage.lowercase()) {
 }
 
 fun parseTagToCode(tag: String): Int? {
-    val match = Regex("^v(\\d+)\\.(\\d+)\\.(\\d+)-([A-Za-z]+)\\.(\\d+)$").matchEntire(tag) ?: return null
-    val (majorPart, minorPart, patchPart, stagePart, sequencePart) = match.destructured
-    val major = majorPart.toIntOrNull() ?: return null
-    val minor = minorPart.toIntOrNull() ?: return null
-    val patch = patchPart.toIntOrNull() ?: return null
-    val sequence = sequencePart.toIntOrNull() ?: return null
-    val stage = stageWeight(stagePart) ?: return null
+    val match = Regex("^v(\\d+)\\.(\\d+)\\.(\\d+)(?:-([A-Za-z]+)\\.(\\d+))?$").matchEntire(tag) ?: return null
+    val major = match.groupValues[1].toIntOrNull() ?: return null
+    val minor = match.groupValues[2].toIntOrNull() ?: return null
+    val patch = match.groupValues[3].toIntOrNull() ?: return null
+    val stageName = match.groupValues[4].ifBlank { "release" }
+    val sequence = match.groupValues[5].ifBlank { "0" }.toIntOrNull() ?: return null
+    val stage = stageWeight(stageName) ?: return null
     return major * 10_000_000 + minor * 100_000 + patch * 1_000 + stage * 100 + sequence
 }
 
@@ -72,6 +72,15 @@ android {
         versionName = getGitVersionName(project)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = false
+        }
     }
 
     signingConfigs {

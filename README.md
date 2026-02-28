@@ -98,13 +98,15 @@ app/build/outputs/apk/debug/
 - **Tag 格式要求**：
 
 ```text
+vMAJ.MIN.PATCH
+# 或
 vMAJ.MIN.PATCH-(alpha|beta|rc|release).N
 ```
 
 示例：
 
+- `v1.4.0`
 - `v1.4.0-alpha.1`
-- `v1.4.0-release.0`
 
 ### Release 必需 Secrets
 

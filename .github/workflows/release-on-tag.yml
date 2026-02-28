@@ -19,12 +19,19 @@ jobs:
           fetch-depth: 0
 
       - name: Validate tag format
+        id: tag_meta
         run: |
           tag="${GITHUB_REF_NAME}"
-          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc|release)\.[0-9]+$ ]]; then
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc|release)\.[0-9]+)?$ ]]; then
             echo "Invalid tag: ${tag}"
-            echo "Expected format: vMAJ.MIN.PATCH-(alpha|beta|rc|release).N"
+            echo "Expected format: vMAJ.MIN.PATCH or vMAJ.MIN.PATCH-(alpha|beta|rc|release).N"
             exit 1
+          fi
+
+          if [[ "${tag}" =~ -(alpha|beta|rc)\.[0-9]+$ ]]; then
+            echo "is_prerelease=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "is_prerelease=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Setup Java
@@ -68,15 +75,50 @@ jobs:
           printf '%s' "${RELEASE_STORE_FILE_BASE64}" | base64 --decode > "${keystore_path}"
           echo "UNNCM_RELEASE_STORE_FILE=${keystore_path}" >> "${GITHUB_ENV}"
 
-      - name: Build release APK
+      - name: Build ABI split release APK
         env:
           UNNCM_RELEASE_STORE_PASSWORD: ${{ secrets.UNNCM_RELEASE_STORE_PASSWORD }}
           UNNCM_RELEASE_KEY_ALIAS: ${{ secrets.UNNCM_RELEASE_KEY_ALIAS }}
           UNNCM_RELEASE_KEY_PASSWORD: ${{ secrets.UNNCM_RELEASE_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon clean assembleRelease
+        run: ./gradlew --no-daemon clean :app:assembleRelease
+
+      - name: Prepare renamed release assets
+        id: assets
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          out_dir="app/build/outputs/apk/release"
+          asset_dir="${RUNNER_TEMP}/release-assets"
+          mkdir -p "${asset_dir}"
+
+          v7a_src=$(find "${out_dir}" -maxdepth 1 -type f -name "*armeabi-v7a-release*.apk" | head -n 1)
+          v8a_src=$(find "${out_dir}" -maxdepth 1 -type f -name "*arm64-v8a-release*.apk" | head -n 1)
+
+          if [[ -z "${v7a_src}" ]]; then
+            echo "Missing armeabi-v7a release apk"
+            exit 1
+          fi
+
+          if [[ -z "${v8a_src}" ]]; then
+            echo "Missing arm64-v8a release apk"
+            exit 1
+          fi
+
+          v7a_dst="${asset_dir}/unncm-${tag}-armeabi-v7a.apk"
+          v8a_dst="${asset_dir}/unncm-${tag}-arm64-v8a.apk"
+
+          cp "${v7a_src}" "${v7a_dst}"
+          cp "${v8a_src}" "${v8a_dst}"
+
+          ls -lah "${asset_dir}"
+
+          echo "asset_dir=${asset_dir}" >> "${GITHUB_OUTPUT}"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: app/build/outputs/apk/release/*.apk
+          fail_on_unmatched_files: true
+          prerelease: ${{ steps.tag_meta.outputs.is_prerelease }}
+          files: |
+            ${{ steps.assets.outputs.asset_dir }}/unncm-${{ github.ref_name }}-armeabi-v7a.apk
+            ${{ steps.assets.outputs.asset_dir }}/unncm-${{ github.ref_name }}-arm64-v8a.apk
