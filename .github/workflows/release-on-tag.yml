@@ -96,14 +96,6 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
-      - name: Ensure Gradle wrapper jar exists
-        if: steps.precheck.outputs.should_build == 'true'
-        run: |
-          if [[ ! -f "gradle/wrapper/gradle-wrapper.jar" ]]; then
-            echo "gradle-wrapper.jar missing in target tag, bootstrapping with installed Gradle..."
-            gradle --no-daemon wrapper
-          fi
-
       - name: Validate signing secrets
         if: steps.precheck.outputs.should_build == 'true'
         env:
