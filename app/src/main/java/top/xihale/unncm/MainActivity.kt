@@ -259,6 +259,15 @@ class MainActivity : AppCompatActivity() {
         )
 
         val swipeCallback = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
+            override fun getAnimationDuration(
+                recyclerView: RecyclerView,
+                animationType: Int,
+                animateDx: Float,
+                animateDy: Float
+            ): Long {
+                return if (animationType == ItemTouchHelper.ANIMATION_TYPE_SWIPE_SUCCESS) 120L else 100L
+            }
+
             override fun onMove(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
