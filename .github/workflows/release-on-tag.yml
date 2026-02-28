@@ -73,7 +73,8 @@ jobs:
 
       - name: Skip message
         if: steps.precheck.outputs.should_build != 'true'
-        run: echo "Skip: release already exists or no valid tag found."
+        run: |
+          echo "Skip: release already exists or no valid tag found."
 
       - name: Checkout target tag
         if: steps.precheck.outputs.should_build == 'true'
