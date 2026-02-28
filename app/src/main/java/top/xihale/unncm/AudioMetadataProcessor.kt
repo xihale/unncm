@@ -163,36 +163,16 @@ object AudioMetadataProcessor {
     fun analyzeMetadata(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult {
         val tempFile = File(cacheDir, "analysis_${System.currentTimeMillis()}_$fileName")
         try {
-            // Stream to temp file
             BufferedInputStream(inputStream).use { input ->
                 tempFile.outputStream().buffered().use { output ->
                     input.copyTo(output)
                 }
             }
 
-            // Perform checks on the temp file
-            val hasComplete = checkCompleteMetadata(tempFile)
-            val hasLyrics = checkLyrics(tempFile)
-            val hasCover = checkCoverArt(tempFile)
-
-            // Read existing tags
-            val tags = try {
-                val audio = AudioFileIO.read(tempFile)
-                val tag = audio.tagOrCreateAndSetDefault
-                MusicMetadata(
-                    title = tag.getFirst(FieldKey.TITLE) ?: "",
-                    artist = tag.getFirst(FieldKey.ARTIST) ?: "",
-                    album = tag.getFirst(FieldKey.ALBUM) ?: ""
-                )
-            } catch (e: Exception) {
-                MusicMetadata("", "", "")
-            }
-
-            return MetadataAnalysisResult(hasComplete, hasLyrics, hasCover, tags)
-
+            return analyzeTagFromFile(tempFile)
         } catch (e: Exception) {
             logger.e("Error analyzing metadata for $fileName", e)
-            return MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
+            return emptyMetadataAnalysisResult()
         } finally {
             tempFile.delete()
         }
@@ -204,12 +184,10 @@ object AudioMetadataProcessor {
     suspend fun analyzeMetadataAsync(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult = withContext(Dispatchers.IO) {
         val tempFile = File(cacheDir, "analysis_${System.currentTimeMillis()}_$fileName")
         try {
-            // Stream to temp file with optimized buffer for large files
             BufferedInputStream(inputStream, 256 * 1024).use { input ->
                 tempFile.outputStream().buffered(256 * 1024).use { output ->
-                    // Use progress callback for large files
                     val totalCopied = input.copyToWithProgress(output, bufferSize = 256 * 1024) { bytesCopied ->
-                        if (bytesCopied % (10 * 1024 * 1024) == 0L) { // Log every 10MB
+                        if (bytesCopied % (10 * 1024 * 1024) == 0L) {
                             logger.d("Copied ${bytesCopied / 1024 / 1024}MB for $fileName")
                         }
                     }
@@ -217,29 +195,10 @@ object AudioMetadataProcessor {
                 }
             }
 
-            // Perform checks on the temp file
-            val hasComplete = checkCompleteMetadata(tempFile)
-            val hasLyrics = checkLyrics(tempFile)
-            val hasCover = checkCoverArt(tempFile)
-
-            // Read existing tags
-            val tags = try {
-                val audio = AudioFileIO.read(tempFile)
-                val tag = audio.tagOrCreateAndSetDefault
-                MusicMetadata(
-                    title = tag.getFirst(FieldKey.TITLE) ?: "",
-                    artist = tag.getFirst(FieldKey.ARTIST) ?: "",
-                    album = tag.getFirst(FieldKey.ALBUM) ?: ""
-                )
-            } catch (e: Exception) {
-                MusicMetadata("", "", "")
-            }
-
-            MetadataAnalysisResult(hasComplete, hasLyrics, hasCover, tags)
-
+            analyzeTagFromFile(tempFile)
         } catch (e: Exception) {
             logger.e("Error analyzing metadata for $fileName", e)
-            MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
+            emptyMetadataAnalysisResult()
         } finally {
             tempFile.delete()
         }
@@ -252,138 +211,69 @@ object AudioMetadataProcessor {
     suspend fun analyzeMetadataLightweight(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult = withContext(Dispatchers.IO) {
         try {
             // Only read first 1MB for metadata analysis (most metadata is at the beginning)
-            val headerBuffer = ByteArray(1024 * 1024) // 1MB buffer
+            val headerBuffer = ByteArray(1024 * 1024)
             val bytesRead = inputStream.use { input ->
                 input.read(headerBuffer)
             }
 
             if (bytesRead <= 0) {
                 logger.w("Empty file: $fileName")
-                return@withContext MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
+                return@withContext emptyMetadataAnalysisResult()
             }
 
-            // Create temp file with only the header for analysis
             val tempFile = File(cacheDir, "lightweight_${System.currentTimeMillis()}_$fileName")
             try {
                 tempFile.writeBytes(headerBuffer.copyOf(bytesRead))
-
-                // Perform basic checks
-                val hasComplete = checkCompleteMetadataLightweight(tempFile)
-
-                // Check for lyrics in the header (even though it's lightweight)
-                val hasLyrics = checkLyricsLightweight(tempFile)
-
-                // For cover art, we assume false in lightweight mode since cover data is usually at the end
-                // But we should be more careful about this assumption
-                val hasCover = false
-
-                // Read basic tags
-                val tags = try {
-                    val audio = AudioFileIO.read(tempFile)
-                    val tag = audio.tagOrCreateAndSetDefault
-                    MusicMetadata(
-                        title = tag.getFirst(FieldKey.TITLE) ?: "",
-                        artist = tag.getFirst(FieldKey.ARTIST) ?: "",
-                        album = tag.getFirst(FieldKey.ALBUM) ?: ""
-                    )
-                } catch (e: Exception) {
-                    MusicMetadata("", "", "")
-                }
-
-                MetadataAnalysisResult(hasComplete, hasLyrics, hasCover, tags)
-
+                analyzeTagFromFile(
+                    audioFile = tempFile,
+                    lyricsMinLength = 10,
+                    skipCoverCheck = true
+                )
             } finally {
                 tempFile.delete()
             }
-
         } catch (e: Exception) {
             logger.e("Error in lightweight metadata analysis for $fileName", e)
-            MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
+            emptyMetadataAnalysisResult()
         }
     }
 
-    /**
-     * Check if audio file already has complete metadata (title, artist, album)
-     */
-    private fun checkCompleteMetadata(audioFile: File): Boolean {
+    private fun analyzeTagFromFile(
+        audioFile: File,
+        lyricsMinLength: Int = 1,
+        skipCoverCheck: Boolean = false
+    ): MetadataAnalysisResult {
         return try {
             val audio = AudioFileIO.read(audioFile)
-            val tag = audio.tag ?: return false
+            val tag = audio.tag ?: return emptyMetadataAnalysisResult()
 
-            val title = tag.getFirst(FieldKey.TITLE)
-            val artist = tag.getFirst(FieldKey.ARTIST)
-            val album = tag.getFirst(FieldKey.ALBUM)
+            val title = tag.getFirst(FieldKey.TITLE) ?: ""
+            val artist = tag.getFirst(FieldKey.ARTIST) ?: ""
+            val album = tag.getFirst(FieldKey.ALBUM) ?: ""
+            val lyrics = tag.getFirst(FieldKey.LYRICS) ?: ""
 
-            !title.isNullOrBlank() && !artist.isNullOrBlank() && !album.isNullOrBlank()
+            val hasComplete = title.isNotBlank() && artist.isNotBlank() && album.isNotBlank()
+            val hasLyrics = if (lyricsMinLength <= 1) {
+                lyrics.isNotBlank()
+            } else {
+                lyrics.trim().length > lyricsMinLength
+            }
+            val hasCover = if (skipCoverCheck) false else tag.artworkList.isNotEmpty()
+
+            MetadataAnalysisResult(
+                hasCompleteMetadata = hasComplete,
+                hasLyrics = hasLyrics,
+                hasCover = hasCover,
+                existingTags = MusicMetadata(title, artist, album)
+            )
         } catch (e: Exception) {
-            logger.w("Failed to read metadata from ${audioFile.name}", e)
-            false
+            logger.w("Failed to analyze metadata from ${audioFile.name}", e)
+            emptyMetadataAnalysisResult()
         }
     }
 
-    /**
-     * Check if audio file has cover art
-     */
-    private fun checkCoverArt(audioFile: File): Boolean {
-        return try {
-            val audio = AudioFileIO.read(audioFile)
-            val tag = audio.tag ?: return false
-            tag.artworkList.isNotEmpty()
-        } catch (e: Exception) {
-            logger.w("Failed to read cover art from ${audioFile.name}", e)
-            false
-        }
-    }
-
-    /**
-     * Check if audio file has lyrics
-     */
-    private fun checkLyrics(audioFile: File): Boolean {
-        return try {
-            val audio = AudioFileIO.read(audioFile)
-            val tag = audio.tag ?: return false
-            val lyrics = tag.getFirst(FieldKey.LYRICS)
-            !lyrics.isNullOrBlank()
-        } catch (e: Exception) {
-            logger.w("Failed to read lyrics from ${audioFile.name}", e)
-            false
-        }
-    }
-
-
-    /**
-     * Lightweight version of complete metadata check for large files
-     */
-    private fun checkCompleteMetadataLightweight(audioFile: File): Boolean {
-        return try {
-            val audio = AudioFileIO.read(audioFile)
-            val tag = audio.tag ?: return false
-
-            val title = tag.getFirst(FieldKey.TITLE)
-            val artist = tag.getFirst(FieldKey.ARTIST)
-            val album = tag.getFirst(FieldKey.ALBUM)
-
-            !title.isNullOrBlank() && !artist.isNullOrBlank() && !album.isNullOrBlank()
-        } catch (e: Exception) {
-            logger.w("Failed to read metadata from ${audioFile.name}", e)
-            false
-        }
-    }
-
-    /**
-     * Lightweight version of lyrics check for large files
-     */
-    private fun checkLyricsLightweight(audioFile: File): Boolean {
-        return try {
-            val audio = AudioFileIO.read(audioFile)
-            val tag = audio.tag ?: return false
-
-            val lyrics = tag.getFirst(FieldKey.LYRICS)
-            !lyrics.isNullOrBlank() && lyrics.trim().length > 10 // Ensure meaningful lyrics content
-        } catch (e: Exception) {
-            logger.w("Failed to check lyrics in ${audioFile.name}", e)
-            false
-        }
+    private fun emptyMetadataAnalysisResult(): MetadataAnalysisResult {
+        return MetadataAnalysisResult(false, false, false, MusicMetadata("", "", ""))
     }
 }
 

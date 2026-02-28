@@ -1,5 +1,6 @@
 package top.xihale.unncm
 
+import okhttp3.Dispatcher
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -10,10 +11,13 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.TimeUnit
 
 /**
@@ -58,11 +62,16 @@ object NeteaseApiService {
     private val logger = Logger.withTag("NeteaseApiService")
     
     private val client = OkHttpClient.Builder()
+        .dispatcher(Dispatcher().apply {
+            maxRequests = 16
+            maxRequestsPerHost = 4
+        })
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
     private const val BASE_URL = "https://music.163.com/weapi"
+    private const val METADATA_CACHE_MAX_ENTRIES = 256
 
     private object CryptoConstants {
         const val PRESET_KEY = "0CoJUm6Qyw8W8jud"
@@ -71,10 +80,70 @@ object NeteaseApiService {
         const val ENC_SEC_KEY = "2d48fd9fb8e58bc9c1f14a7bda1b8e49a3520a67a2300a1f73766caee29f2411c5350bceb15ed196ca963d6a6d0b61f3734f0a0f4a172ad853f16dd06018bc5ca8fb640eaa8decd1cd41f66e166cea7a3023bd63960e656ec97751cfc7ce08d943928e9db9b35400ff3d138bda1ab511a06fbee75585191cabe0e6e63f7350d6"
     }
 
+    private data class MetadataCacheKey(
+        val keyword: String,
+        val fetchCover: Boolean,
+        val fetchLyrics: Boolean
+    )
+
+    private val metadataCache = object : LinkedHashMap<MetadataCacheKey, ExtendedMusicMetadata>(
+        METADATA_CACHE_MAX_ENTRIES,
+        0.75f,
+        true
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MetadataCacheKey, ExtendedMusicMetadata>?): Boolean {
+            return size > METADATA_CACHE_MAX_ENTRIES
+        }
+    }
+
+    private val cacheMutex = Mutex()
+    private val inFlightMutex = Mutex()
+    private val inFlightRequests = mutableMapOf<MetadataCacheKey, Deferred<Result<ExtendedMusicMetadata>>>()
+
     suspend fun getCompleteMetadata(
         keyword: String,
         fetchCover: Boolean = true,
         fetchLyrics: Boolean = true
+    ): Result<ExtendedMusicMetadata> = coroutineScope {
+        val cacheKey = MetadataCacheKey(normalizeKeyword(keyword), fetchCover, fetchLyrics)
+
+        getCachedMetadata(cacheKey)?.let {
+            logger.d("Metadata cache hit: '${cacheKey.keyword}'")
+            return@coroutineScope Result.success(it)
+        }
+
+        val (deferred, isOwner) = inFlightMutex.withLock {
+            val existing = inFlightRequests[cacheKey]
+            if (existing != null) {
+                existing to false
+            } else {
+                val created = async(Dispatchers.IO) {
+                    fetchCompleteMetadataInternal(keyword, fetchCover, fetchLyrics)
+                }
+                inFlightRequests[cacheKey] = created
+                created to true
+            }
+        }
+
+        try {
+            val result = deferred.await()
+            if (isOwner && result.isSuccess) {
+                putCachedMetadata(cacheKey, result.getOrThrow())
+            }
+            result
+        } finally {
+            if (isOwner) {
+                inFlightMutex.withLock {
+                    inFlightRequests.remove(cacheKey)
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchCompleteMetadataInternal(
+        keyword: String,
+        fetchCover: Boolean,
+        fetchLyrics: Boolean
     ): Result<ExtendedMusicMetadata> = coroutineScope {
         try {
             val searchResult = withContext(Dispatchers.IO) { searchSong(keyword) }
@@ -111,6 +180,26 @@ object NeteaseApiService {
         }
     }
 
+    private fun normalizeKeyword(keyword: String): String {
+        return keyword.trim().lowercase()
+    }
+
+    private fun ExtendedMusicMetadata.safeCopy(): ExtendedMusicMetadata {
+        return copy(coverData = coverData?.copyOf())
+    }
+
+    private suspend fun getCachedMetadata(cacheKey: MetadataCacheKey): ExtendedMusicMetadata? {
+        return cacheMutex.withLock {
+            metadataCache[cacheKey]?.safeCopy()
+        }
+    }
+
+    private suspend fun putCachedMetadata(cacheKey: MetadataCacheKey, metadata: ExtendedMusicMetadata) {
+        cacheMutex.withLock {
+            metadataCache[cacheKey] = metadata.safeCopy()
+        }
+    }
+
     private fun searchSong(keyword: String): SongSearchResult? {
         try {
             val responseJson = postWeApi(
@@ -143,7 +232,7 @@ object NeteaseApiService {
                 title = song.getString("name"),
                 artist = artistName,
                 album = albumObj?.optString("name") ?: "",
-                coverUrl = albumObj?.optString("picUrl")?.replace("http://", "https://"),
+                coverUrl = albumObj?.optString("picUrl")?.replace("http://", "https://")?.let { toOptimizedCoverUrl(it) },
                 duration = song.optLong("dt", 0),
                 metadata = metadata
             )
@@ -176,7 +265,7 @@ object NeteaseApiService {
                 .url(url)
                 .addHeader("User-Agent", "Mozilla/5.0")
                 .build()
-                
+
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     return response.body?.bytes()
@@ -186,6 +275,12 @@ object NeteaseApiService {
             logger.w("Cover fetch error ($url): ${e.message}")
         }
         return null
+    }
+
+    private fun toOptimizedCoverUrl(url: String): String {
+        if (url.contains("param=")) return url
+        val separator = if (url.contains("?")) "&" else "?"
+        return "$url${separator}param=500y500"
     }
 
     // --- Helper Methods ---

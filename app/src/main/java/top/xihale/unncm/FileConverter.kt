@@ -107,7 +107,7 @@ class FileConverter(
     }
 
     private suspend fun enhanceRegularAudio(
-        inputStream: InputStream, // Kept for consistency, but new logic rereads from uiFile.uri
+        inputStream: InputStream,
         baseName: String,
         originalName: String,
         uiFile: UiFile
@@ -116,26 +116,44 @@ class FileConverter(
         logger.i("--- Enhancing metadata/lyrics for: $originalName ---")
 
         return try {
-            // 1. Fetch metadata, lyrics, and cover from API
-            val apiMetadata = fetchMetadata(baseName, fetchCover = true, fetchLyrics = true)
-            
-            // If API fetch fails or returns null, we can't do anything for enhancement.
-            if (apiMetadata == null) {
-                logger.w("Failed to fetch metadata from API for: $originalName, skipping enhancement.")
-                return ConversionResult.Success 
+            val analysis = AudioMetadataProcessor.analyzeMetadataAsync(inputStream, originalName, cacheDir)
+            val needs = RegularAudioNeeds(
+                needTitle = analysis.existingTags.title.isBlank(),
+                needArtist = analysis.existingTags.artist.isBlank(),
+                needAlbum = analysis.existingTags.album.isBlank(),
+                needLyrics = !analysis.hasLyrics,
+                needCover = !analysis.hasCover
+            )
+
+            if (!needs.needsAnyUpdate) {
+                logger.i("No metadata enhancement needed for: $originalName")
+                return ConversionResult.Success
             }
 
-            // 2. Prepare metadata and lyrics for writing
-            val finalMetadata = apiMetadata.metadata 
-            val lyrics = apiMetadata.lyrics
-            val coverData = apiMetadata.coverData
+            val apiMetadata = fetchMetadata(
+                keyword = baseName,
+                fetchCover = needs.needCover,
+                fetchLyrics = needs.needLyrics
+            )
 
-            // 3. Write metadata, lyrics and cover back to the original file
-            val result = updateAudioFileMetadata(uiFile, finalMetadata, lyrics, coverData, ext)
-            
-            logger.i("Metadata/lyrics/cover enhancement completed for: $originalName -> $result")
+            if (apiMetadata == null) {
+                logger.w("Failed to fetch metadata from API for: $originalName, skipping enhancement.")
+                return ConversionResult.Success
+            }
+
+            val finalMetadata = mergeRegularAudioMetadata(analysis.existingTags, apiMetadata.metadata, needs)
+            val lyricsToWrite = if (needs.needLyrics) apiMetadata.lyrics?.takeIf { it.isNotBlank() } else null
+            val coverToWrite = if (needs.needCover) apiMetadata.coverData?.takeIf { it.isNotEmpty() } else null
+            val metadataChanged = finalMetadata != analysis.existingTags
+
+            if (!metadataChanged && lyricsToWrite == null && coverToWrite == null) {
+                logger.i("No writable new metadata fetched for: $originalName")
+                return ConversionResult.Success
+            }
+
+            val result = updateAudioFileMetadata(uiFile, finalMetadata, lyricsToWrite, coverToWrite, ext)
+            logger.i("Metadata enhancement completed for: $originalName -> $result")
             result
-
         } catch (e: Exception) {
             logger.e("Error enhancing regular audio file: $originalName", e)
             ConversionResult.Failure(e)
@@ -195,8 +213,36 @@ class FileConverter(
     }
 
 
+    private data class RegularAudioNeeds(
+        val needTitle: Boolean,
+        val needArtist: Boolean,
+        val needAlbum: Boolean,
+        val needLyrics: Boolean,
+        val needCover: Boolean
+    ) {
+        val needsAnyUpdate: Boolean
+            get() = needTitle || needArtist || needAlbum || needLyrics || needCover
+    }
+
     private suspend fun fetchMetadata(keyword: String, fetchCover: Boolean, fetchLyrics: Boolean): ExtendedMusicMetadata? {
         return NeteaseApiService.getCompleteMetadata(keyword, fetchCover, fetchLyrics).getOrNull()
+    }
+
+    private fun mergeRegularAudioMetadata(
+        existing: MusicMetadata,
+        fromApi: MusicMetadata,
+        needs: RegularAudioNeeds
+    ): MusicMetadata {
+        fun keepOrFill(needsField: Boolean, oldValue: String, newValue: String): String {
+            if (!needsField) return oldValue
+            return if (newValue.isNotBlank()) newValue else oldValue
+        }
+
+        return MusicMetadata(
+            title = keepOrFill(needs.needTitle, existing.title, fromApi.title),
+            artist = keepOrFill(needs.needArtist, existing.artist, fromApi.artist),
+            album = keepOrFill(needs.needAlbum, existing.album, fromApi.album)
+        )
     }
 
     private fun mergeMetadata(ncmInfo: NcmInfo, apiMetadata: ExtendedMusicMetadata?, fallbackTitle: String): ExtendedMusicMetadata {
@@ -218,24 +264,6 @@ class FileConverter(
             lyrics = null,
             coverData = ncmInfo.cover
         )
-    }
-    
-    private data class SimpleTags(val title: String, val artist: String, val album: String)
-    
-    private fun readExistingTags(file: File): SimpleTags {
-        return try {
-            val audio = org.jaudiotagger.audio.AudioFileIO.read(file)
-            val tag = audio.tag
-            if (tag != null) {
-                SimpleTags(
-                    tag.getFirst(org.jaudiotagger.tag.FieldKey.TITLE) ?: "",
-                    tag.getFirst(org.jaudiotagger.tag.FieldKey.ARTIST) ?: "",
-                    tag.getFirst(org.jaudiotagger.tag.FieldKey.ALBUM) ?: ""
-                )
-            } else SimpleTags("", "", "")
-        } catch (e: Exception) {
-            SimpleTags("", "", "")
-        }
     }
 
     private fun writeOutput(

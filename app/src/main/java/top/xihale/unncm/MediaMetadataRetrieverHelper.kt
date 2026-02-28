@@ -14,31 +14,50 @@ import top.xihale.unncm.utils.Logger
  */
 object MediaMetadataRetrieverHelper {
     private val logger = Logger.withTag("MediaMetadataRetriever")
-    
+
+    data class MetadataNeeds(
+        val missingTitle: Boolean,
+        val missingArtist: Boolean,
+        val missingCover: Boolean
+    ) {
+        val needsProcessing: Boolean
+            get() = missingTitle || missingArtist || missingCover
+    }
+
     /**
-     * Check if metadata (title/artist) is missing from a file URI.
-     * Returns true if processing is needed (metadata missing).
+     * Returns which fields are missing from a file URI.
      */
-    fun analyzeMetadataFromUri(context: Context, fileUri: android.net.Uri): Boolean {
+    fun analyzeMetadataNeedsFromUri(context: Context, fileUri: Uri): MetadataNeeds {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(context, fileUri)
             val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
             val hasCover = retriever.embeddedPicture != null
-            
-            // Need processing if title or artist is missing/empty, or cover is missing
-            title.isNullOrBlank() || artist.isNullOrBlank() || !hasCover
+
+            MetadataNeeds(
+                missingTitle = title.isNullOrBlank(),
+                missingArtist = artist.isNullOrBlank(),
+                missingCover = !hasCover
+            )
         } catch (e: Exception) {
             logger.e("Failed to analyze metadata from URI: $fileUri", e)
-            true // Assume needs processing on error
+            MetadataNeeds(missingTitle = true, missingArtist = true, missingCover = true)
         } finally {
             try {
                 retriever.release()
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // Ignore release errors
             }
         }
+    }
+
+    /**
+     * Backward-compatible shortcut.
+     * Returns true if processing is needed.
+     */
+    fun analyzeMetadataFromUri(context: Context, fileUri: Uri): Boolean {
+        return analyzeMetadataNeedsFromUri(context, fileUri).needsProcessing
     }
 
     suspend fun extractEmbeddedThumbnail(
