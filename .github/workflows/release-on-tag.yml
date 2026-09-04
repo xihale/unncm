@@ -88,7 +88,26 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
+
+      - name: Setup Rust core toolchain
+        if: steps.precheck.outputs.should_build == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi,aarch64-linux-android
+
+      - name: Install Android native build tools
+        if: steps.precheck.outputs.should_build == 'true'
+        run: |
+          sdkmanager "ndk;28.2.13676358"
+          cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Test Rust core
+        if: steps.precheck.outputs.should_build == 'true'
+        run: |
+          cargo fmt --manifest-path core/Cargo.toml -- --check
+          cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path core/Cargo.toml --locked
 
       - name: Setup Gradle
         if: steps.precheck.outputs.should_build == 'true'

@@ -53,3 +53,7 @@
 
 # Keep custom SafeAndroidArtwork implementation
 -keep class top.xihale.unncm.AudioMetadataProcessor$SafeAndroidArtwork { *; }
+
+# Rust resolves these classes and the native entry point by their JVM names.
+-keep class top.xihale.unncm.NativeNcmCore { *; }
+-keep class top.xihale.unncm.NcmInfo { *; }

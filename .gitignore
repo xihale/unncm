@@ -27,6 +27,7 @@ local.properties
 bin/
 gen/
 out/
+core/target/
 
 # Log Files
 *.log

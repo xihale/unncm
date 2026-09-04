@@ -48,6 +48,23 @@ object AudioMetadataProcessor {
         }
     }
 
+    /** Adds tags to an already materialized audio file and streams it out. */
+    fun processExistingAudioFile(
+        audioFile: File,
+        metadata: MusicMetadata,
+        lyrics: String? = null,
+        coverData: ByteArray? = null,
+        outputStream: OutputStream
+    ): Result<Unit> {
+        return try {
+            tagAndCopyAudioFile(audioFile, metadata, lyrics, coverData, outputStream)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            logger.e("Error processing tags", e)
+            Result.failure(e)
+        }
+    }
+
     /**
      * Async version of processAudioData for better IO performance
      */
@@ -89,61 +106,67 @@ object AudioMetadataProcessor {
                 writer(fileOut)
             }
             
-            // 3. Process Tags on Temp File
-            val audioFile = AudioFileIO.read(tempFile)
-            var tag = audioFile.tag
-            if (tag == null) {
-                tag = audioFile.createDefaultTag()
-                audioFile.tag = tag
-            }
-            
-            try { tag.setField(FieldKey.TITLE, metadata.title) } catch (e: Exception) {}
-            try { tag.setField(FieldKey.ARTIST, metadata.artist) } catch (e: Exception) {}
-            try { tag.setField(FieldKey.ALBUM, metadata.album) } catch (e: Exception) {}
-            
-            if (!lyrics.isNullOrEmpty()) {
-                try {
-                    tag.setField(FieldKey.LYRICS, lyrics)
-                } catch (e: Exception) {
-                     logger.w("Could not set lyrics: ${e.message}")
-                }
-            }
-
-            if (coverData != null && coverData.isNotEmpty()) {
-                try {
-                    // Decode image bounds and mime type using Android API
-                    val options = android.graphics.BitmapFactory.Options()
-                    options.inJustDecodeBounds = true
-                    android.graphics.BitmapFactory.decodeByteArray(coverData, 0, coverData.size, options)
-
-                    // Use custom SafeAndroidArtwork to avoid ImageIO dependency and UnsupportedOperationException
-                    val artwork = SafeAndroidArtwork()
-                    artwork.binaryData = coverData
-                    artwork.mimeType = options.outMimeType ?: "image/jpeg"
-                    artwork.width = options.outWidth
-                    artwork.height = options.outHeight
-                    artwork.pictureType = PictureTypes.DEFAULT_ID // Front Cover
-                    artwork.isLinked = false
-                    
-                    tag.deleteArtworkField()
-                    tag.setField(artwork)
-                } catch (e: Throwable) {
-                    logger.e("Failed to set artwork", e)
-                }
-            }
-            
-            audioFile.commit()
-            
-            // 4. Copy Modified Temp File to Output Stream
-            // Use BufferedInputStream and large buffer for copy
-            tempFile.inputStream().buffered(64 * 1024).use { fileIn ->
-                fileIn.copyTo(outputStream, bufferSize = 64 * 1024)
-            }
-        } catch (e: Exception) {
-            throw e
+            tagAndCopyAudioFile(tempFile, metadata, lyrics, coverData, outputStream)
         } finally {
-            // 5. Clean up
+            // 3. Clean up
             try { tempFile?.delete() } catch (e: Exception) {}
+        }
+    }
+
+    private fun tagAndCopyAudioFile(
+        sourceFile: File,
+        metadata: MusicMetadata,
+        lyrics: String?,
+        coverData: ByteArray?,
+        outputStream: OutputStream
+    ) {
+        val audioFile = AudioFileIO.read(sourceFile)
+        var tag = audioFile.tag
+        if (tag == null) {
+            tag = audioFile.createDefaultTag()
+            audioFile.tag = tag
+        }
+
+        try { tag.setField(FieldKey.TITLE, metadata.title) } catch (e: Exception) {}
+        try { tag.setField(FieldKey.ARTIST, metadata.artist) } catch (e: Exception) {}
+        try { tag.setField(FieldKey.ALBUM, metadata.album) } catch (e: Exception) {}
+
+        if (!lyrics.isNullOrEmpty()) {
+            try {
+                tag.setField(FieldKey.LYRICS, lyrics)
+            } catch (e: Exception) {
+                logger.w("Could not set lyrics: ${e.message}")
+            }
+        }
+
+        if (coverData != null && coverData.isNotEmpty()) {
+            try {
+                // Decode image bounds and mime type using Android API
+                val options = android.graphics.BitmapFactory.Options()
+                options.inJustDecodeBounds = true
+                android.graphics.BitmapFactory.decodeByteArray(coverData, 0, coverData.size, options)
+
+                // Use custom SafeAndroidArtwork to avoid ImageIO dependency and UnsupportedOperationException
+                val artwork = SafeAndroidArtwork()
+                artwork.binaryData = coverData
+                artwork.mimeType = options.outMimeType ?: "image/jpeg"
+                artwork.width = options.outWidth
+                artwork.height = options.outHeight
+                artwork.pictureType = PictureTypes.DEFAULT_ID // Front Cover
+                artwork.isLinked = false
+
+                tag.deleteArtworkField()
+                tag.setField(artwork)
+            } catch (e: Throwable) {
+                logger.e("Failed to set artwork", e)
+            }
+        }
+
+        audioFile.commit()
+
+        // Copy the tagged file to its SAF destination.
+        sourceFile.inputStream().buffered(64 * 1024).use { fileIn ->
+            fileIn.copyTo(outputStream, bufferSize = 64 * 1024)
         }
     }
 

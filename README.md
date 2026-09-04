@@ -1,6 +1,6 @@
 # unNCM for Android
 
-一个基于 Kotlin 的原生 Android 工具，用于：
+一个基于 Kotlin、Jetpack Compose 与 Rust 的原生 Android 工具，用于：
 
 - 解密网易云音乐 `.ncm` 文件为常见音频格式（如 `mp3` / `flac`）
 - 为音频文件补全元数据（标题 / 艺术家 / 专辑）
@@ -12,7 +12,7 @@
 
 ## 功能特性
 
-- **NCM 解密**：解析 NCM 头信息并流式解密音频内容
+- **Rust NCM 核心**：原生解析 NCM 头信息并流式解密音频内容
 - **元数据增强**：自动查询网易云接口并写入标签、歌词、封面
 - **双入口导入**：
   - 选择文件夹（SAF）
@@ -37,7 +37,8 @@
 
 ## 技术栈
 
-- **Kotlin** + **Android ViewBinding**
+- **Kotlin** + **Jetpack Compose / Material 3**
+- **Rust** + **JNI**（NCM 解析、AES 与流式解密）
 - **MVVM**（`MainActivity` + `MainViewModel`）
 - **Coroutines / StateFlow / LiveData**
 - **jAudioTagger**（音频标签读写）
@@ -53,7 +54,7 @@ app/src/main/java/top/xihale/unncm/
 ├── MainActivity.kt                 # UI 交互、文件选择、状态恢复
 ├── MainViewModel.kt                # 扫描与并发转换调度
 ├── FileConverter.kt                # 单文件处理总入口（NCM / 普通音频）
-├── NcmDecryptor.kt                 # NCM 格式解析与解密
+├── NativeNcmCore.kt                # Rust JNI 边界
 ├── AudioMetadataProcessor.kt       # 标签/歌词/封面写入
 ├── NeteaseApiService.kt            # 网易云搜索、歌词、封面 API
 ├── MediaMetadataRetrieverHelper.kt # 轻量元数据检测
@@ -61,8 +62,10 @@ app/src/main/java/top/xihale/unncm/
 ├── FileAdapter.kt
 └── utils/
    ├── FastScanner.kt               # SAF 流式扫描
-   ├── CryptoUtils.kt
    └── Logger.kt
+core/
+├── Cargo.toml
+└── src/                            # NCM 解析、解密与 JNI 导出
 ```
 
 ---
@@ -73,12 +76,30 @@ app/src/main/java/top/xihale/unncm/
 
 - Android Studio（建议最新稳定版）
 - Android SDK 34
-- JDK 17（与 AGP 8.13.x 更匹配）
+- JDK 21
+- Rust stable、`cargo-ndk 4.1.2`
+- Android NDK `28.2.13676358`
+- Rust Android targets：`armv7-linux-androideabi`、`aarch64-linux-android`
+
+首次构建前安装 Rust 目标与构建器：
+
+```bash
+rustup target add armv7-linux-androideabi aarch64-linux-android
+cargo install cargo-ndk --version 4.1.2 --locked
+```
 
 ### 构建 Debug APK
 
 ```bash
 ./gradlew :app:assembleDebug
+```
+
+Gradle 会先运行 Rust release 构建，并把两个 ABI 的 `libunncm_core.so` 自动打入 APK。
+
+Rust 核心测试：
+
+```bash
+cargo test --manifest-path core/Cargo.toml --locked
 ```
 
 APK 默认输出：

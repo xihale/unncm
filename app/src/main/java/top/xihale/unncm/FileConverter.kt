@@ -2,11 +2,13 @@ package top.xihale.unncm
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.xihale.unncm.utils.Logger
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 
 sealed interface ConversionResult {
@@ -49,17 +51,15 @@ class FileConverter(
     private suspend fun processNcmStream(uri: Uri, baseName: String, fileName: String): ConversionResult {
         logger.i("--- Processing NCM file (decryption) ---")
 
-        val inputStream = context.contentResolver.openInputStream(uri) ?: run {
-            logger.e("Failed to open input stream for NCM file: $fileName")
-            return ConversionResult.Failure(Exception("Failed to open input stream"))
+        val inputDescriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: run {
+            logger.e("Failed to open input descriptor for NCM file: $fileName")
+            return ConversionResult.Failure(Exception("Failed to open input file descriptor"))
         }
 
-        return inputStream.use { stream ->
-            java.io.BufferedInputStream(stream).use { bufferedInput ->
-                val result = processNcmFile(bufferedInput, baseName, fileName)
-                logger.i("NCM processing completed for: $fileName -> $result")
-                result
-            }
+        return inputDescriptor.use { descriptor ->
+            val result = processNcmFile(descriptor, baseName, fileName)
+            logger.i("NCM processing completed for: $fileName -> $result")
+            result
         }
     }
 
@@ -82,27 +82,47 @@ class FileConverter(
     }
 
     private suspend fun processNcmFile(
-        inputStream: InputStream,
+        inputDescriptor: ParcelFileDescriptor,
         baseName: String,
         originalName: String
     ): ConversionResult {
         logger.d("Decrypting NCM: $originalName")
-        val decryptor = NcmDecryptor(inputStream)
-        val ncmInfo = decryptor.parseHeader() 
-            ?: return ConversionResult.Failure(Exception("Failed to parse NCM header"))
+        var decryptedFile = File.createTempFile("unncm_decrypted_", ".tmp", cacheDir)
 
-        // 1. Fetch Metadata (Always needed for NCM to get better tags)
-        val apiMetadata = fetchMetadata(baseName, fetchCover = true, fetchLyrics = true)
+        return try {
+            val outputDescriptor = ParcelFileDescriptor.open(
+                decryptedFile,
+                ParcelFileDescriptor.MODE_WRITE_ONLY or
+                    ParcelFileDescriptor.MODE_CREATE or
+                    ParcelFileDescriptor.MODE_TRUNCATE
+            )
+            val ncmInfo = outputDescriptor.use { descriptor ->
+                NativeNcmCore.decrypt(inputDescriptor.fd, descriptor.fd)
+            }
 
-        // 2. Merge Metadata
-        val finalMetadata = mergeMetadata(ncmInfo, apiMetadata, baseName)
+            // Fetch richer metadata after native decryption has validated the input.
+            val apiMetadata = fetchMetadata(baseName, fetchCover = true, fetchLyrics = true)
+            val finalMetadata = mergeMetadata(ncmInfo, apiMetadata, baseName)
 
-        // 3. Write Output
-        val ext = ncmInfo.format
-        val outputName = "$baseName.$ext"
+            val ext = ncmInfo.format
+            val outputName = "$baseName.$ext"
+            val typedAudioFile = File(cacheDir, "${decryptedFile.nameWithoutExtension}.$ext")
+            if (!decryptedFile.renameTo(typedAudioFile)) {
+                throw IOException("Could not prepare decrypted audio for tagging")
+            }
+            decryptedFile = typedAudioFile
 
-        return writeOutput(outputName, finalMetadata.metadata, ext, apiMetadata?.lyrics, apiMetadata?.coverData) { output ->
-            decryptor.decryptAudio(output)
+            writeOutput(
+                outputName,
+                decryptedFile,
+                finalMetadata.metadata,
+                finalMetadata.lyrics,
+                finalMetadata.coverData
+            )
+        } finally {
+            if (!decryptedFile.delete()) {
+                logger.w("Failed to delete decrypted temporary file: ${decryptedFile.name}")
+            }
         }
     }
 
@@ -198,7 +218,7 @@ class FileConverter(
                         coverData = coverData,
                         outputStream = bufferedOut,
                         cacheDir = cacheDir
-                    )
+                    ).getOrThrow()
                 }
             }
 
@@ -252,7 +272,7 @@ class FileConverter(
         // Fallback to NCM info
         val ncmMetadata = MusicMetadata(
             title = ncmInfo.title ?: fallbackTitle,
-            artist = ncmInfo.artist.joinToString("/") ?: "",
+            artist = ncmInfo.artist.joinToString("/"),
             album = ncmInfo.album ?: ""
         )
 
@@ -268,17 +288,16 @@ class FileConverter(
 
     private fun writeOutput(
         fileName: String,
+        sourceFile: File,
         metadata: MusicMetadata,
-        format: String,
         lyrics: String? = null,
-        coverData: ByteArray? = null,
-        writeAction: (java.io.OutputStream) -> Unit
+        coverData: ByteArray? = null
     ): ConversionResult {
         val outputFile = outputDir.findFile(fileName) ?: outputDir.createFile("audio/*", fileName)
             ?: return ConversionResult.Failure(Exception("Could not create output file: $fileName"))
 
         return try {
-            writeAudioDataToFile(outputFile, metadata, format, lyrics, coverData, writeAction)
+            writeAudioDataToFile(outputFile, sourceFile, metadata, lyrics, coverData)
             ConversionResult.Success
         } catch (e: Exception) {
             cleanupPartialFile(outputFile)
@@ -288,26 +307,23 @@ class FileConverter(
 
     private fun writeAudioDataToFile(
         outputFile: DocumentFile,
+        sourceFile: File,
         metadata: MusicMetadata,
-        format: String,
         lyrics: String? = null,
-        coverData: ByteArray? = null,
-        writeAction: (java.io.OutputStream) -> Unit
+        coverData: ByteArray? = null
     ) {
         val stream = context.contentResolver.openOutputStream(outputFile.uri)
             ?: throw Exception("Could not open output stream")
 
         stream.use { outputStream ->
             java.io.BufferedOutputStream(outputStream).use { bufferedOut ->
-                AudioMetadataProcessor.processAudioData(
-                    writer = writeAction,
-                    format = format,
+                AudioMetadataProcessor.processExistingAudioFile(
+                    audioFile = sourceFile,
                     metadata = metadata,
                     lyrics = lyrics,
                     coverData = coverData,
-                    outputStream = bufferedOut,
-                    cacheDir = cacheDir
-                )
+                    outputStream = bufferedOut
+                ).getOrThrow()
             }
         }
     }
