@@ -36,18 +36,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val logger = Logger.withTag("MainViewModel")
 
-    // LiveData for UI state
-    private val _inputDir = MutableLiveData<DocumentFile?>()
-    val inputDir: LiveData<DocumentFile?> = _inputDir
+    // StateFlow for UI state
+    private val _inputDir = MutableStateFlow<DocumentFile?>(null)
+    val inputDir: StateFlow<DocumentFile?> = _inputDir.asStateFlow()
 
-    private val _outputDir = MutableLiveData<DocumentFile?>()
-    val outputDir: LiveData<DocumentFile?> = _outputDir
+    private val _outputDir = MutableStateFlow<DocumentFile?>(null)
+    val outputDir: StateFlow<DocumentFile?> = _outputDir.asStateFlow()
 
     private val _pendingFiles = MutableStateFlow<List<UiFile>>(emptyList())
     val pendingFiles: StateFlow<List<UiFile>> = _pendingFiles.asStateFlow()
 
-    private val _conversionStatus = MutableLiveData<ConversionUiState>()
-    val conversionStatus: LiveData<ConversionUiState> = _conversionStatus
+    private val _conversionStatus = MutableStateFlow<ConversionUiState>(ConversionUiState.Idle)
+    val conversionStatus: StateFlow<ConversionUiState> = _conversionStatus.asStateFlow()
 
     private var scanJob: Job? = null
     private var conversionJob: Job? = null
@@ -66,12 +66,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setOutputDir(documentFile: DocumentFile?) {
-        val target = documentFile.also { logger.d("Output document file set: ${it?.name}") }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            _outputDir.value = target
-        } else {
-            _outputDir.postValue(target)
-        }
+        _outputDir.value = documentFile.also { logger.d("Output document file set: ${it?.name}") }
     }
 
     fun setPendingFiles(files: List<UiFile>) {
@@ -107,6 +102,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _conversionStatus.value = ConversionUiState.Idle
     }
 
+    fun cancelConversion() {
+        conversionJob?.cancel()
+        conversionJob = null
+        scanJob?.cancel()
+        scanJob = null
+        _conversionStatus.value = ConversionUiState.Idle
+    }
+
 
     private fun isValidOutputDirectory(docFile: DocumentFile): Boolean {
         return !(!docFile.exists() || !docFile.isDirectory)
@@ -126,18 +129,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         scanJob?.cancel()
         scanJob = viewModelScope.launch(Dispatchers.IO) {
-            _conversionStatus.postValue(ConversionUiState.Scanning)
+            _conversionStatus.value = ConversionUiState.Scanning
             clearPendingFiles() // Clear existing list
 
             try {
                 val inputExists = inputDir.exists()
                 if (!inputExists) {
                     logger.e("Input directory invalid: uri=${inputDir.uri}")
-                    _conversionStatus.postValue(
+                    _conversionStatus.value =
                         ConversionUiState.Error(
                             getApplication<Application>().getString(R.string.msg_invalid_input_dir)
                         )
-                    )
                     return@launch
                 }
 
@@ -186,7 +188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 logger.i("=== Scan completed ===")
-                _conversionStatus.postValue(ConversionUiState.Idle)
+                _conversionStatus.value = ConversionUiState.Idle
             } catch (e: Exception) {
                 handleScanError(e)
             }
