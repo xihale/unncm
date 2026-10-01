@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>unNCM — 把锁起来的歌，还给你</title>
+<title>unNCM — .ncm 进，音乐出。</title>
 <meta name="description" content="unNCM 是一款开源 Android 工具：在你的手机本地，把网易云音乐下载的 .ncm 加密文件还原成 mp3 / flac，补全标题、艺术家、专辑、歌词与封面。Rust 内核，1–8 线程并发，MIT 开源。">
-<meta property="og:title" content="unNCM — 把锁起来的歌，还给你">
+<meta property="og:title" content="unNCM — .ncm 进，音乐出。">
 <meta property="og:description" content="开源 Android 工具：本地解密网易云音乐 .ncm → mp3 / flac，Rust 内核，MIT 开源。">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='31' fill='%230b0b0c'/%3E%3Ccircle cx='32' cy='32' r='14' fill='%23c20c0c'/%3E%3Ccircle cx='32' cy='32' r='2.5' fill='%230b0b0c'/%3E%3C/svg%3E">
@@ -75,9 +75,10 @@
   }
   h1{
     font-family:var(--serif);font-weight:900;
-    font-size:clamp(2.4rem,6.4vw,5.5rem);
-    line-height:1.18;letter-spacing:.01em;
+    font-size:clamp(2.6rem,8.5vw,7rem);
+    line-height:1.16;letter-spacing:.01em;
   }
+  h1 .mono{font-family:var(--mono);font-weight:700;letter-spacing:-.02em}
   h1 em{font-style:normal;color:var(--red-bright)}
   .hero-sub{
     margin-top:32px;max-width:34em;color:var(--dim);font-size:clamp(15px,1.4vw,17px);
@@ -132,11 +133,6 @@
     position:absolute;left:50%;top:50%;width:5.5%;aspect-ratio:1;
     transform:translate(-50%,-50%);border-radius:50%;background:var(--bg);
     box-shadow:0 0 0 2px rgba(0,0,0,.6);
-  }
-  .rpm{
-    position:absolute;right:clamp(8px,2vw,20px);bottom:-12px;
-    font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--faint);
-    writing-mode:vertical-rl;
   }
 
   /* ── 跑马灯 ───────────────────────────── */
@@ -202,10 +198,11 @@
     display:grid;grid-template-columns:52px auto minmax(0,1fr) auto;
     gap:clamp(14px,2vw,24px);align-items:baseline;
     padding:26px 8px;border-top:1px solid var(--line);
-    transition:background .3s,padding-left .3s;
+    transition:opacity .3s;
   }
   .track:last-of-type{border-bottom:1px solid var(--line)}
-  .track:hover{background:rgba(242,237,227,.03);padding-left:20px}
+  .sides:hover .track{opacity:.35}
+  .sides:hover .track:hover{opacity:1}
   .track-no{
     font-family:var(--mono);font-size:13px;color:var(--faint);
     letter-spacing:.1em;transition:color .3s;
@@ -319,11 +316,10 @@
   <div class="hero">
     <div>
       <p class="kicker reveal on">NetEase Cloud Music · NCM Unlocker · Android</p>
-      <h1 class="reveal d1">把锁起来的歌，<br>还<em>给你</em>。</h1>
+      <h1 class="reveal d1"><span class="mono">.ncm</span> 进，<br><em>音乐出</em>。</h1>
       <p class="hero-sub reveal d2">
-        你在网易云音乐下载的歌，躺在手机里却是一个打不开的 <code>.ncm</code>。
-        unNCM 在你自己的手机上、不登录任何账号，把它还原成本来的
-        <code>.mp3</code> / <code>.flac</code>，并把标题、艺术家、专辑、歌词和封面一并放回歌里。
+        unNCM 在手机本地，把网易云音乐下载的 <code>.ncm</code> 还原成
+        <code>.mp3</code> / <code>.flac</code>。解密全程离线，不登录任何账号。
       </p>
       <div class="cta-row reveal d3">
         <a class="btn btn-primary" href="https://github.com/xihale/unncm/releases/latest" target="_blank" rel="noopener">下载最新版 APK ↓</a>
@@ -349,7 +345,6 @@
         </div>
         <div class="spindle"></div>
       </div>
-      <span class="rpm">SIDE A · 33⅓ RPM</span>
     </div>
   </div>
 </main>
@@ -373,21 +368,20 @@
   <section id="notes">
     <div class="sec-head reveal">
       <span class="sec-no">01</span>
-      <h2 class="sec-title">关于这张「唱片」</h2>
-      <span class="sec-en">Liner Notes</span>
+      <h2 class="sec-title">它是什么</h2>
+      <span class="sec-en">What &amp; Why</span>
     </div>
     <p class="manifesto reveal">
-      一首 <em>.ncm</em>，本质上是一件被上锁的行李——歌还在里面，
-      只是你打不开。<span class="quiet">unNCM 不碰云端、不碰账号，
-      它只做一件事：在你自己的手机里，</span><em>把钥匙还给文件本身</em>。
-      <span class="quiet">然后，安静地退出。</span>
+      网易云下载的歌，到手是一个 .ncm——<em>文件是你的，打开方式不是</em>。
+      <span class="quiet">unNCM 把它还原成标准音频，标签、歌词、封面一并补齐。</span>
+      之后任何播放器、任何设备，都能直接听。
     </p>
     <div class="file-change reveal d1" aria-label="文件转换示意">
       <span class="file-chip"><b>晴天</b>.ncm</span>
       <span class="file-arrow">⟶</span>
       <span class="file-chip unlocked"><b>晴天</b>.flac · 44.1kHz · 周杰伦</span>
     </div>
-    <p class="manifesto-note reveal d2">* 解密在你的设备本地完成；仅补全元数据时访问网易云公开接口。</p>
+    <p class="manifesto-note reveal d2">* 解密在本地离线完成；仅标签、歌词、封面的补全会访问网易云公开接口。</p>
   </section>
 
   <!-- ═══ 02 TRACKLIST ═══ -->
@@ -403,25 +397,25 @@
         <div class="track">
           <span class="track-no">A1</span>
           <span class="track-name">流式解密</span>
-          <span class="track-desc">NCM 头解析与音频流解密全部由 Rust 完成，边读边写，大文件不占内存。</span>
+          <span class="track-desc">NCM 头解析与流式解密都在 Rust 层完成，边读边写，不把整个文件装进内存。</span>
           <span class="track-tech">Rust / JNI</span>
         </div>
         <div class="track">
           <span class="track-no">A2</span>
           <span class="track-name">并发转换</span>
-          <span class="track-desc">1–8 线程可调，整包歌单一口气跑完，扫描与转换流水线并行。</span>
+          <span class="track-desc">线程数 1–8 可调；扫描与转换流水线并行，整张歌单一轮跑完。</span>
           <span class="track-tech">Coroutines × N</span>
         </div>
         <div class="track">
           <span class="track-no">A3</span>
           <span class="track-name">元数据补全</span>
-          <span class="track-desc">自动查询网易云接口，把标题、艺术家、专辑写回音频标签。</span>
+          <span class="track-desc">查询网易云接口，把标题、艺术家、专辑写回音频标签。</span>
           <span class="track-tech">NetEase API</span>
         </div>
         <div class="track">
           <span class="track-no">A4</span>
           <span class="track-name">歌词与封面</span>
-          <span class="track-desc">可选嵌入 LRC 歌词与高清封面，播放器里恢复完整专辑的模样。</span>
+          <span class="track-desc">可选嵌入歌词与封面，任何播放器都能显示完整信息。</span>
           <span class="track-tech">LRC / Cover</span>
         </div>
       </div>
@@ -430,25 +424,25 @@
         <div class="track">
           <span class="track-no">B1</span>
           <span class="track-name">双入口导入</span>
-          <span class="track-desc">整个文件夹一次选，或从任意目录多选散装文件，都走系统 SAF。</span>
+          <span class="track-desc">选整个文件夹，或多选散装文件；都走系统文件选择器（SAF）。</span>
           <span class="track-tech">SAF</span>
         </div>
         <div class="track">
           <span class="track-no">B2</span>
           <span class="track-name">会话恢复</span>
-          <span class="track-desc">上次选的目录和待处理列表都在，杀掉重开接着来，持久化 URI 权限。</span>
+          <span class="track-desc">上次选的目录和待处理列表会保留；中途退出，重开接着转。</span>
           <span class="track-tech">Persistent URI</span>
         </div>
         <div class="track">
           <span class="track-no">B3</span>
           <span class="track-name">极简界面</span>
-          <span class="track-desc">没有顶栏，没有废话；划掉不要的，剩下的交给内核。Material 3 深色。</span>
+          <span class="track-desc">一屏列表，无顶栏；不要的曲目向左一划。Material 3 深色。</span>
           <span class="track-tech">Compose / M3</span>
         </div>
         <div class="track">
           <span class="track-no">B4</span>
           <span class="track-name">完全开源</span>
-          <span class="track-desc">每一行都摊在 GitHub 上，MIT 许可——拿去改，也别忘了听正版。</span>
+          <span class="track-desc">代码在 GitHub，MIT 许可；随便看，随便改，自己编译也行。</span>
           <span class="track-tech">MIT License</span>
         </div>
       </div>
@@ -459,29 +453,29 @@
   <section id="play">
     <div class="sec-head reveal">
       <span class="sec-no">03</span>
-      <h2 class="sec-title">播放方法</h2>
-      <span class="sec-en">How to Play</span>
+      <h2 class="sec-title">怎么用</h2>
+      <span class="sec-en">Usage</span>
     </div>
     <div class="steps">
       <div class="step reveal">
         <span class="step-no">壹</span>
         <div class="step-body">
-          <h3>放进唱机</h3>
-          <p>打开 unNCM，选择 <code>.ncm</code> 文件或整个下载文件夹——文件夹选择器默认直接落在网易云的下载目录，不用翻。</p>
+          <h3>选择文件</h3>
+          <p>选文件夹或多选 <code>.ncm</code> 都行；文件夹选择器默认打开网易云的下载目录，不用自己翻。</p>
         </div>
       </div>
       <div class="step reveal">
         <span class="step-no">贰</span>
         <div class="step-body">
-          <h3>落下唱针</h3>
-          <p>点「开始转换」，Rust 内核多线程并发解密，进度实时可见；不想要的曲目，向左轻轻一划。</p>
+          <h3>开始转换</h3>
+          <p>1–8 线程并发解密，进度实时显示；不想要的曲目，向左划掉即可。</p>
         </div>
       </div>
       <div class="step reveal">
         <span class="step-no">叁</span>
         <div class="step-body">
           <h3>取回音乐</h3>
-          <p>到输出目录的 <code>unlocked</code> 文件夹里，拿回属于你的 <code>.mp3</code> / <code>.flac</code>——标签、歌词、封面，一样不少。</p>
+          <p>解好的文件在原目录的 <code>unlocked</code> 文件夹里：mp3 / flac，标签、歌词、封面都已写入。</p>
         </div>
       </div>
     </div>
@@ -507,13 +501,13 @@
         </dl>
         <div class="dl-cta">
           <a class="btn btn-primary" href="https://github.com/xihale/unncm/releases/latest" target="_blank" rel="noopener">下载最新版 APK ↓</a>
-          <p class="dl-note">手机一般选 arm64-v8a；不确定就都试试，装错会提示不支持。</p>
+          <p class="dl-note">绝大多数手机选 arm64-v8a，老设备选 armeabi-v7a。</p>
         </div>
       </div>
       <div class="reveal d1">
         <p class="manifesto" style="max-width:none">
-          没有广告，没有账号，没有「会员解锁更多格式」。<br>
-          <span class="quiet">一个把歌还给你的工具，<br>本该就这么简单。</span>
+          免费，无广告，不需要账号。<br>
+          <span class="quiet">MIT 开源——不喜欢，可以自己编译。</span>
         </p>
         <div class="file-change" style="margin-top:40px">
           <a class="btn btn-ghost" href="https://github.com/xihale/unncm" target="_blank" rel="noopener">github.com/xihale/unncm</a>
