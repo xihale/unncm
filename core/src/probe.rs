@@ -149,7 +149,12 @@ fn scan_vorbis_comments<R: Read>(reader: &mut R, block_len: u64) -> u32 {
         if end > buf.len() {
             return None;
         }
-        let value = u32::from_le_bytes([buf[*cursor], buf[*cursor + 1], buf[*cursor + 2], buf[*cursor + 3]]);
+        let value = u32::from_le_bytes([
+            buf[*cursor],
+            buf[*cursor + 1],
+            buf[*cursor + 2],
+            buf[*cursor + 3],
+        ]);
         *cursor = end;
         Some(value)
     }
@@ -159,13 +164,10 @@ fn scan_vorbis_comments<R: Read>(reader: &mut R, block_len: u64) -> u32 {
     let Some(vendor_len) = read_le32(&buf, &mut cursor).map(|v| v as usize) else {
         return 0;
     };
-    let Some(count) = cursor
-        .checked_add(vendor_len)
-        .and_then(|offset| {
-            cursor = offset;
-            read_le32(&buf, &mut cursor)
-        })
-    else {
+    let Some(count) = cursor.checked_add(vendor_len).and_then(|offset| {
+        cursor = offset;
+        read_le32(&buf, &mut cursor)
+    }) else {
         return 0;
     };
     if count > 4096 {
@@ -184,7 +186,10 @@ fn scan_vorbis_comments<R: Read>(reader: &mut R, block_len: u64) -> u32 {
         cursor += comment_len;
 
         if let Some(eq) = comment.iter().position(|&b| b == b'=') {
-            let key: Vec<u8> = comment[..eq].iter().map(|b| b.to_ascii_uppercase()).collect();
+            let key: Vec<u8> = comment[..eq]
+                .iter()
+                .map(|b| b.to_ascii_uppercase())
+                .collect();
             match key.as_slice() {
                 b"TITLE" => found |= HAS_TITLE,
                 b"ARTIST" => found |= HAS_ARTIST,
@@ -272,7 +277,10 @@ mod tests {
 
         let mut data = id3_header(4, frames.len());
         data.extend_from_slice(&frames);
-        assert_eq!(probe_metadata(&mut Cursor::new(data)), HAS_TITLE | HAS_ARTIST);
+        assert_eq!(
+            probe_metadata(&mut Cursor::new(data)),
+            HAS_TITLE | HAS_ARTIST
+        );
     }
 
     #[test]
@@ -287,7 +295,10 @@ mod tests {
 
         let mut data = id3_header(2, frames.len());
         data.extend_from_slice(&frames);
-        assert_eq!(probe_metadata(&mut Cursor::new(data)), HAS_TITLE | HAS_COVER);
+        assert_eq!(
+            probe_metadata(&mut Cursor::new(data)),
+            HAS_TITLE | HAS_COVER
+        );
     }
 
     #[test]
@@ -329,7 +340,11 @@ mod tests {
     fn flac_with_picture_block_is_complete() {
         let mut data = vec![b'f', b'L', b'a', b'C'];
         data.extend(flac_block(0, &[0u8; 34], false));
-        data.extend(flac_block(4, &vorbis_comment_block(&["ARTIST=Artist", "TITLE=Song"]), false));
+        data.extend(flac_block(
+            4,
+            &vorbis_comment_block(&["ARTIST=Artist", "TITLE=Song"]),
+            false,
+        ));
         data.extend(flac_block(6, &[0u8; 8], true));
         assert_eq!(probe_metadata(&mut Cursor::new(data)), METADATA_COMPLETE);
     }
@@ -337,8 +352,15 @@ mod tests {
     #[test]
     fn flac_without_picture_block_reports_partial() {
         let mut data = vec![b'f', b'L', b'a', b'C'];
-        data.extend(flac_block(4, &vorbis_comment_block(&["TITLE=Song", "ARTIST=Artist"]), true));
-        assert_eq!(probe_metadata(&mut Cursor::new(data)), HAS_TITLE | HAS_ARTIST);
+        data.extend(flac_block(
+            4,
+            &vorbis_comment_block(&["TITLE=Song", "ARTIST=Artist"]),
+            true,
+        ));
+        assert_eq!(
+            probe_metadata(&mut Cursor::new(data)),
+            HAS_TITLE | HAS_ARTIST
+        );
     }
 
     #[test]
