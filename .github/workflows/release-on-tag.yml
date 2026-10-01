@@ -96,13 +96,12 @@ jobs:
         with:
           targets: armv7-linux-androideabi,aarch64-linux-android
 
-      - name: Setup Android SDK
-        if: steps.precheck.outputs.should_build == 'true'
-        uses: android-actions/setup-android@v3
-
       - name: Install Android native build tools
         if: steps.precheck.outputs.should_build == 'true'
         run: |
+          sdkm="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools"
+          export PATH="$(ls -d "${sdkm}"/*/bin | sort -V | tail -n1):${PATH}"
+          yes | sdkmanager --licenses > /dev/null
           sdkmanager "ndk;28.2.13676358"
           cargo install cargo-ndk --version 4.1.2 --locked
 
