@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>unNCM — .ncm 进，音乐出。</title>
-<meta name="description" content="unNCM 是一款开源 Android 工具：在你的手机本地，把网易云音乐下载的 .ncm 加密文件还原成 mp3 / flac，补全标题、艺术家、专辑、歌词与封面。Rust 内核，1–8 线程并发，MIT 开源。">
-<meta property="og:title" content="unNCM — .ncm 进，音乐出。">
+<title>unNCM - .ncm 进，音乐出。</title>
+<meta name="description" content="unNCM 是一款开源 Android 工具：在你的手机本地，把网易云音乐下载的 .ncm 加密文件还原成 mp3 / flac，补全标题、艺术家、专辑、歌词与封面。Rust 内核，1-8 线程并发，MIT 开源。">
+<meta property="og:title" content="unNCM - .ncm 进，音乐出。">
 <meta property="og:description" content="开源 Android 工具：本地解密网易云音乐 .ncm → mp3 / flac，Rust 内核，MIT 开源。">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='31' fill='%230b0b0c'/%3E%3Ccircle cx='32' cy='32' r='14' fill='%23c20c0c'/%3E%3Ccircle cx='32' cy='32' r='2.5' fill='%230b0b0c'/%3E%3C/svg%3E">
@@ -44,7 +44,8 @@
     position:fixed;top:0;left:0;right:0;z-index:10;
     display:flex;justify-content:space-between;align-items:center;
     padding:14px clamp(20px,4vw,48px);
-    background:rgba(11,11,12,.78);backdrop-filter:blur(10px);
+    background:rgba(11,11,12,.78);
+    -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line);
   }
   .wordmark{
@@ -69,13 +70,9 @@
     align-items:center;gap:24px;
     padding-top:96px;position:relative;
   }
-  .kicker{
-    font-family:var(--mono);font-size:12px;letter-spacing:.32em;
-    color:var(--red-bright);text-transform:uppercase;margin-bottom:28px;
-  }
   h1{
     font-family:var(--serif);font-weight:900;
-    font-size:clamp(2.6rem,8.5vw,7rem);
+    font-size:clamp(2.9rem,8.5vw,7rem);
     line-height:1.16;letter-spacing:.01em;
   }
   h1 .mono{font-family:var(--mono);font-weight:700;letter-spacing:-.02em}
@@ -95,11 +92,6 @@
   .btn-primary:hover{background:var(--red-bright);border-color:var(--red-bright)}
   .btn-ghost{color:var(--ink);border-color:var(--line)}
   .btn-ghost:hover{border-color:var(--ink)}
-  .meta-line{
-    margin-top:28px;font-family:var(--mono);font-size:12px;
-    letter-spacing:.1em;color:var(--faint);
-  }
-  .meta-line b{color:var(--dim);font-weight:400}
 
   /* ── 黑胶 ─────────────────────────────── */
   .vinyl-stage{position:relative;display:flex;justify-content:flex-end}
@@ -150,17 +142,10 @@
 
   /* ── 通用 section ─────────────────────── */
   section{padding:16vh 0 0}
-  .sec-head{display:flex;align-items:baseline;gap:20px;margin-bottom:56px}
-  .sec-no{
-    font-family:var(--mono);font-size:13px;letter-spacing:.2em;color:var(--red-bright);
-  }
+  .sec-head{margin-bottom:48px}
   .sec-title{
     font-family:var(--serif);font-weight:900;
     font-size:clamp(1.9rem,4vw,3rem);letter-spacing:.03em;
-  }
-  .sec-en{
-    margin-left:auto;font-family:var(--mono);font-size:11px;
-    letter-spacing:.3em;color:var(--faint);text-transform:uppercase;
   }
 
   /* ── Manifesto ────────────────────────── */
@@ -197,10 +182,9 @@
   .track{
     display:grid;grid-template-columns:52px auto minmax(0,1fr) auto;
     gap:clamp(14px,2vw,24px);align-items:baseline;
-    padding:26px 8px;border-top:1px solid var(--line);
+    padding:24px 8px;
     transition:opacity .3s;
   }
-  .track:last-of-type{border-bottom:1px solid var(--line)}
   .sides:hover .track{opacity:.35}
   .sides:hover .track:hover{opacity:1}
   .track-no{
@@ -222,21 +206,15 @@
   @media(min-width:960px){.sides{grid-template-columns:1fr 1fr;gap:64px}}
 
   /* ── 使用三步 ─────────────────────────── */
-  .steps{display:grid;gap:0;counter-reset:step}
-  .step{
-    display:grid;grid-template-columns:auto 1fr;gap:clamp(20px,4vw,56px);
-    padding:40px 0;border-top:1px solid var(--line);align-items:start;
-  }
-  .step:last-child{border-bottom:1px solid var(--line)}
-  .step-no{
-    font-family:var(--serif);font-weight:900;font-size:clamp(2.6rem,6vw,4.4rem);
-    color:transparent;-webkit-text-stroke:1px var(--faint);line-height:1;
-    transition:color .4s;
-  }
-  .step:hover .step-no{color:var(--red);-webkit-text-stroke:1px var(--red)}
+  .steps{max-width:620px}
+  .step{padding:32px 0}
   .step-body h3{
     font-family:var(--serif);font-weight:700;font-size:clamp(1.2rem,2.2vw,1.6rem);
     margin-bottom:10px;letter-spacing:.04em;
+  }
+  .step-body h3::before{
+    content:"";display:inline-block;width:26px;height:2px;
+    background:var(--red);margin-right:14px;vertical-align:.18em;
   }
   .step-body p{color:var(--dim);font-size:15px;max-width:36em}
   .step-body code{
@@ -251,9 +229,9 @@
   .specs dt{
     font-family:var(--mono);font-size:12px;letter-spacing:.2em;
     color:var(--faint);text-transform:uppercase;
-    padding:16px 32px 16px 0;border-top:1px solid var(--line);
+    padding:10px 32px 10px 0;
   }
-  .specs dd{padding:16px 0;border-top:1px solid var(--line);color:var(--ink);font-size:15px}
+  .specs dd{padding:10px 0;color:var(--ink);font-size:15px}
   .dl-cta{margin-top:52px;display:flex;flex-direction:column;gap:16px;align-items:flex-start}
   .dl-cta .btn{padding:20px 36px;font-size:14px}
   .dl-note{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.08em}
@@ -281,13 +259,22 @@
 
   /* ── 响应式 ───────────────────────────── */
   @media(max-width:880px){
-    .hero{grid-template-columns:1fr;padding-top:120px;min-height:auto}
-    .vinyl-stage{justify-content:center;margin-top:56px}
-    .vinyl{width:min(72vw,360px)}
-    .track{grid-template-columns:44px 1fr;row-gap:8px}
+    section{padding:11vh 0 0}
+    .sec-head{margin-bottom:40px}
+    .hero{grid-template-columns:1fr;padding-top:96px;min-height:auto}
+    .vinyl-stage{justify-content:center;margin-top:48px}
+    .vinyl{width:min(78vw,360px)}
+    .cta-row .btn{flex:1 1 100%;justify-content:center}
+    .reveal{transition-duration:.55s}
+    .sides{gap:44px}
+    .track{padding:20px 4px;row-gap:10px}
     .track-desc{grid-column:2}
     .track-tech{grid-column:2}
-    .sec-en{display:none}
+    .file-change{flex-direction:column;align-items:flex-start;gap:12px}
+    .file-arrow{transform:rotate(90deg)}
+    .specs dt{padding-right:18px}
+    .specs dd{font-size:14px}
+    .dl-cta .btn{width:100%;justify-content:center}
     header nav a:nth-child(1){display:none}
   }
   @media(prefers-reduced-motion:reduce){
@@ -315,17 +302,15 @@
   <!-- ═══ HERO ═══ -->
   <div class="hero">
     <div>
-      <p class="kicker reveal on">NetEase Cloud Music · NCM Unlocker · Android</p>
-      <h1 class="reveal d1"><span class="mono">.ncm</span> 进，<br><em>音乐出</em>。</h1>
-      <p class="hero-sub reveal d2">
+      <h1 class="reveal on"><span class="mono">.ncm</span> 进，<br><em>音乐出</em>。</h1>
+      <p class="hero-sub reveal d1">
         unNCM 在手机本地，把网易云音乐下载的 <code>.ncm</code> 还原成
         <code>.mp3</code> / <code>.flac</code>。解密全程离线，不登录任何账号。
       </p>
-      <div class="cta-row reveal d3">
-        <a class="btn btn-primary" href="https://github.com/xihale/unncm/releases/latest" target="_blank" rel="noopener">下载最新版 APK ↓</a>
+      <div class="cta-row reveal d2">
+        <a class="btn btn-primary" href="https://github.com/xihale/unncm/releases/latest" target="_blank" rel="noopener">下载最新版 APK</a>
         <a class="btn btn-ghost" href="https://github.com/xihale/unncm" target="_blank" rel="noopener">GitHub 源码</a>
       </div>
-      <p class="meta-line reveal d3">v0.4.1 · Android 8.0+ · 约 3 MB · <b>MIT License</b></p>
     </div>
 
     <div class="vinyl-stage reveal d2" aria-hidden="true">
@@ -353,12 +338,12 @@
 <div class="ticker" aria-hidden="true">
   <div class="ticker-track" id="ticker">
     <span><i>.NCM</i> → .MP3 / .FLAC</span>
-    <span>本地解密 · 不登录 · 不上传</span>
+    <span>本地解密 / 离线 / 不登录</span>
     <span>标题 / 艺术家 / 专辑</span>
-    <span>歌词 · 封面 补全</span>
+    <span>歌词 / 封面 补全</span>
     <span><i>RUST</i> 内核</span>
-    <span>1–8 线程并发</span>
-    <span>开源 · MIT</span>
+    <span>1-8 线程并发</span>
+    <span>MIT 开源</span>
   </div>
 </div>
 
@@ -367,19 +352,17 @@
   <!-- ═══ 01 LINER NOTES ═══ -->
   <section id="notes">
     <div class="sec-head reveal">
-      <span class="sec-no">01</span>
       <h2 class="sec-title">它是什么</h2>
-      <span class="sec-en">What &amp; Why</span>
     </div>
     <p class="manifesto reveal">
-      网易云下载的歌，到手是一个 .ncm——<em>文件是你的，打开方式不是</em>。
+      网易云下载的歌，到手是一个 .ncm：<em>文件是你的，打开方式不是</em>。
       <span class="quiet">unNCM 把它还原成标准音频，标签、歌词、封面一并补齐。</span>
       之后任何播放器、任何设备，都能直接听。
     </p>
     <div class="file-change reveal d1" aria-label="文件转换示意">
       <span class="file-chip"><b>晴天</b>.ncm</span>
       <span class="file-arrow">⟶</span>
-      <span class="file-chip unlocked"><b>晴天</b>.flac · 44.1kHz · 周杰伦</span>
+      <span class="file-chip unlocked"><b>晴天</b>.flac, 44.1kHz, 周杰伦</span>
     </div>
     <p class="manifesto-note reveal d2">* 解密在本地离线完成；仅标签、歌词、封面的补全会访问网易云公开接口。</p>
   </section>
@@ -387,13 +370,11 @@
   <!-- ═══ 02 TRACKLIST ═══ -->
   <section>
     <div class="sec-head reveal">
-      <span class="sec-no">02</span>
       <h2 class="sec-title">曲目单</h2>
-      <span class="sec-en">Tracklist</span>
     </div>
     <div class="sides">
       <div class="reveal">
-        <p class="side">Side A — 性能</p>
+        <p class="side">Side A · 性能</p>
         <div class="track">
           <span class="track-no">A1</span>
           <span class="track-name">流式解密</span>
@@ -403,7 +384,7 @@
         <div class="track">
           <span class="track-no">A2</span>
           <span class="track-name">并发转换</span>
-          <span class="track-desc">线程数 1–8 可调；扫描与转换流水线并行，整张歌单一轮跑完。</span>
+          <span class="track-desc">线程数 1-8 可调；扫描与转换流水线并行，整张歌单一轮跑完。</span>
           <span class="track-tech">Coroutines × N</span>
         </div>
         <div class="track">
@@ -420,7 +401,7 @@
         </div>
       </div>
       <div class="reveal d1">
-        <p class="side">Side B — 体验</p>
+        <p class="side">Side B · 体验</p>
         <div class="track">
           <span class="track-no">B1</span>
           <span class="track-name">双入口导入</span>
@@ -452,27 +433,22 @@
   <!-- ═══ 03 HOW TO PLAY ═══ -->
   <section id="play">
     <div class="sec-head reveal">
-      <span class="sec-no">03</span>
       <h2 class="sec-title">怎么用</h2>
-      <span class="sec-en">Usage</span>
     </div>
     <div class="steps">
       <div class="step reveal">
-        <span class="step-no">壹</span>
         <div class="step-body">
           <h3>选择文件</h3>
           <p>选文件夹或多选 <code>.ncm</code> 都行；文件夹选择器默认打开网易云的下载目录，不用自己翻。</p>
         </div>
       </div>
       <div class="step reveal">
-        <span class="step-no">贰</span>
         <div class="step-body">
           <h3>开始转换</h3>
-          <p>1–8 线程并发解密，进度实时显示；不想要的曲目，向左划掉即可。</p>
+          <p>1-8 线程并发解密，进度实时显示；不想要的曲目，向左划掉即可。</p>
         </div>
       </div>
       <div class="step reveal">
-        <span class="step-no">叁</span>
         <div class="step-body">
           <h3>取回音乐</h3>
           <p>解好的文件在原目录的 <code>unlocked</code> 文件夹里：mp3 / flac，标签、歌词、封面都已写入。</p>
@@ -484,9 +460,7 @@
   <!-- ═══ 04 SPEC & DOWNLOAD ═══ -->
   <section id="download">
     <div class="sec-head reveal">
-      <span class="sec-no">04</span>
       <h2 class="sec-title">规格与下载</h2>
-      <span class="sec-en">Specs &amp; Download</span>
     </div>
     <div class="dl-grid">
       <div class="reveal">
@@ -496,18 +470,18 @@
           <dt>系统</dt><dd>Android 8.0 及以上</dd>
           <dt>体积</dt><dd>约 3 MB</dd>
           <dt>内核</dt><dd>Rust + JNI 流式解密</dd>
-          <dt>界面</dt><dd>Kotlin · Jetpack Compose · Material 3</dd>
-          <dt>许可</dt><dd>MIT License · 完全开源</dd>
+          <dt>界面</dt><dd>Kotlin / Compose / Material 3</dd>
+          <dt>许可</dt><dd>MIT 开源</dd>
         </dl>
         <div class="dl-cta">
-          <a class="btn btn-primary" href="https://github.com/xihale/unncm/releases/latest" target="_blank" rel="noopener">下载最新版 APK ↓</a>
+          <a class="btn btn-primary" href="https://github.com/xihale/unncm/releases/latest" target="_blank" rel="noopener">下载最新版 APK</a>
           <p class="dl-note">绝大多数手机选 arm64-v8a，老设备选 armeabi-v7a。</p>
         </div>
       </div>
       <div class="reveal d1">
         <p class="manifesto" style="max-width:none">
           免费，无广告，不需要账号。<br>
-          <span class="quiet">MIT 开源——不喜欢，可以自己编译。</span>
+          <span class="quiet">MIT 开源，不喜欢可以自己编译。</span>
         </p>
         <div class="file-change" style="margin-top:40px">
           <a class="btn btn-ghost" href="https://github.com/xihale/unncm" target="_blank" rel="noopener">github.com/xihale/unncm</a>
@@ -530,8 +504,8 @@
       </div>
     </div>
     <div class="foot-end">
-      <span>unNCM — unlock your music</span>
-      <span>© <span id="year">2025</span> xihale · MIT</span>
+      <span>unNCM</span>
+      <span>© <span id="year">2025</span> xihale, MIT</span>
     </div>
   </footer>
 
