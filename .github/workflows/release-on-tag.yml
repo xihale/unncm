@@ -96,6 +96,10 @@ jobs:
         with:
           targets: armv7-linux-androideabi,aarch64-linux-android
 
+      - name: Setup Android SDK
+        if: steps.precheck.outputs.should_build == 'true'
+        uses: android-actions/setup-android@v3
+
       - name: Install Android native build tools
         if: steps.precheck.outputs.should_build == 'true'
         run: |
