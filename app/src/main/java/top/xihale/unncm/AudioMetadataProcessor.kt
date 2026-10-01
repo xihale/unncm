@@ -8,7 +8,6 @@ import org.jaudiotagger.tag.TagOptionSingleton
 import org.jaudiotagger.tag.images.AndroidArtwork
 import org.jaudiotagger.tag.reference.PictureTypes
 import top.xihale.unncm.utils.Logger
-import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.InputStream
@@ -181,77 +180,36 @@ object AudioMetadataProcessor {
     )
 
     /**
-     * Analyzes metadata from an input stream by streaming it to a temporary file once.
+     * 元数据集中在文件头部（ID3v2 / FLAC metadata block），读前 1MB 即可覆盖绝大多数情况。
      */
-    fun analyzeMetadata(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult {
-        val tempFile = File(cacheDir, "analysis_${System.currentTimeMillis()}_$fileName")
-        try {
-            BufferedInputStream(inputStream).use { input ->
-                tempFile.outputStream().buffered().use { output ->
-                    input.copyTo(output)
-                }
-            }
-
-            return analyzeTagFromFile(tempFile)
-        } catch (e: Exception) {
-            logger.e("Error analyzing metadata for $fileName", e)
-            return emptyMetadataAnalysisResult()
-        } finally {
-            tempFile.delete()
-        }
-    }
+    private const val HEADER_READ_LIMIT = 1024 * 1024
 
     /**
-     * Async version of analyzeMetadata for better performance
-     */
-    suspend fun analyzeMetadataAsync(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult = withContext(Dispatchers.IO) {
-        val tempFile = File(cacheDir, "analysis_${System.currentTimeMillis()}_$fileName")
-        try {
-            BufferedInputStream(inputStream, 256 * 1024).use { input ->
-                tempFile.outputStream().buffered(256 * 1024).use { output ->
-                    val totalCopied = input.copyToWithProgress(output, bufferSize = 256 * 1024) { bytesCopied ->
-                        if (bytesCopied % (10 * 1024 * 1024) == 0L) {
-                            logger.d("Copied ${bytesCopied / 1024 / 1024}MB for $fileName")
-                        }
-                    }
-                    logger.d("Total copied: ${totalCopied / 1024 / 1024}MB for $fileName")
-                }
-            }
-
-            analyzeTagFromFile(tempFile)
-        } catch (e: Exception) {
-            logger.e("Error analyzing metadata for $fileName", e)
-            emptyMetadataAnalysisResult()
-        } finally {
-            tempFile.delete()
-        }
-    }
-
-    /**
-     * Memory-efficient metadata analysis for large files
-     * Only analyzes the first few KB of the file for metadata
+     * Lightweight metadata analysis: 只读文件头部，避免为读标签而拷贝整个音频文件。
+     * 头部截断导致解析失败时返回空结果，上层会按"需要补全"兜底，方向安全。
      */
     suspend fun analyzeMetadataLightweight(inputStream: InputStream, fileName: String, cacheDir: File): MetadataAnalysisResult = withContext(Dispatchers.IO) {
         try {
-            // Only read first 1MB for metadata analysis (most metadata is at the beginning)
-            val headerBuffer = ByteArray(1024 * 1024)
-            val bytesRead = inputStream.use { input ->
-                input.read(headerBuffer)
+            // InputStream.read 单次调用不保证填满缓冲区，必须循环读满
+            val headerBuffer = ByteArray(HEADER_READ_LIMIT)
+            var offset = 0
+            inputStream.use { input ->
+                while (offset < headerBuffer.size) {
+                    val read = input.read(headerBuffer, offset, headerBuffer.size - offset)
+                    if (read < 0) break
+                    offset += read
+                }
             }
 
-            if (bytesRead <= 0) {
+            if (offset <= 0) {
                 logger.w("Empty file: $fileName")
                 return@withContext emptyMetadataAnalysisResult()
             }
 
             val tempFile = File(cacheDir, "lightweight_${System.currentTimeMillis()}_$fileName")
             try {
-                tempFile.writeBytes(headerBuffer.copyOf(bytesRead))
-                analyzeTagFromFile(
-                    audioFile = tempFile,
-                    lyricsMinLength = 10,
-                    skipCoverCheck = true
-                )
+                tempFile.writeBytes(headerBuffer.copyOf(offset))
+                analyzeTagFromFile(audioFile = tempFile, skipCoverCheck = false)
             } finally {
                 tempFile.delete()
             }
@@ -300,22 +258,3 @@ object AudioMetadataProcessor {
     }
 }
 
-/**
- * Extension function to copy input stream with progress callback
- */
-private fun InputStream.copyToWithProgress(
-    out: OutputStream,
-    bufferSize: Int = 8192,
-    progressCallback: (Long) -> Unit = {}
-): Long {
-    var bytesCopied: Long = 0
-    val buffer = ByteArray(bufferSize)
-    var bytes = read(buffer)
-    while (bytes >= 0) {
-        out.write(buffer, 0, bytes)
-        bytesCopied += bytes
-        progressCallback(bytesCopied)
-        bytes = read(buffer)
-    }
-    return bytesCopied
-}

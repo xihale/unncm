@@ -1,8 +1,11 @@
 mod core;
+mod probe;
 
 pub use core::{NcmError, NcmInfo, decrypt};
+pub use probe::probe_metadata;
 
 use std::fs::File;
+use std::io::BufReader;
 use std::os::fd::FromRawFd;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -32,6 +35,21 @@ pub extern "system" fn Java_top_xihale_unncm_NativeNcmCore_nativeDecrypt<'local>
             JObject::null().into_raw()
         }
     }
+}
+
+/// 扫描探针：返回位掩码（1=有标题，2=有歌手，4=有封面），0 表示无法识别。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_top_xihale_unncm_NativeNcmCore_nativeProbeMetadata(
+    _env: JNIEnv,
+    _class: JClass,
+    fd: jint,
+) -> jint {
+    let file = match duplicate_file(fd, "probe") {
+        Ok(file) => file,
+        Err(_) => return 0,
+    };
+    let mut reader = BufReader::new(file);
+    probe_metadata(&mut reader) as jint
 }
 
 fn decrypt_from_descriptors<'local>(

@@ -72,6 +72,7 @@ object NeteaseApiService {
 
     private const val BASE_URL = "https://music.163.com/weapi"
     private const val METADATA_CACHE_MAX_ENTRIES = 256
+    private const val COVER_CACHE_MAX_ENTRIES = 32
 
     private object CryptoConstants {
         const val PRESET_KEY = "0CoJUm6Qyw8W8jud"
@@ -99,6 +100,14 @@ object NeteaseApiService {
     private val cacheMutex = Mutex()
     private val inFlightMutex = Mutex()
     private val inFlightRequests = mutableMapOf<MetadataCacheKey, Deferred<Result<ExtendedMusicMetadata>>>()
+
+    // 封面按 URL 缓存：同专辑多首歌共享一张封面，避免重复下载
+    private val coverCache = object : LinkedHashMap<String, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean {
+            return size > COVER_CACHE_MAX_ENTRIES
+        }
+    }
+    private val coverCacheMutex = Mutex()
 
     suspend fun getCompleteMetadata(
         keyword: String,
@@ -157,7 +166,7 @@ object NeteaseApiService {
 
             val coverDeferred = async(Dispatchers.IO) {
                 if (fetchCover && searchResult.coverUrl != null) {
-                    fetchCoverImage(searchResult.coverUrl)
+                    fetchCoverImageCached(searchResult.coverUrl)
                 } else null
             }
 
@@ -257,6 +266,13 @@ object NeteaseApiService {
             logger.w("Lyrics fetch error for $songId: ${e.message}")
             return null
         }
+    }
+
+    private suspend fun fetchCoverImageCached(url: String): ByteArray? {
+        coverCacheMutex.withLock { coverCache[url] }?.let { return it }
+        val data = fetchCoverImage(url) ?: return null
+        coverCacheMutex.withLock { coverCache[url] = data }
+        return data
     }
 
     private fun fetchCoverImage(url: String): ByteArray? {

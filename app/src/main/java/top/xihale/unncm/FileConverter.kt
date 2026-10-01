@@ -5,11 +5,15 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import top.xihale.unncm.utils.FastScanner
 import top.xihale.unncm.utils.Logger
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.util.concurrent.ConcurrentHashMap
 
 sealed interface ConversionResult {
     data object Success : ConversionResult
@@ -23,6 +27,33 @@ class FileConverter(
     private val cacheDir: File
 ) {
     private val logger = Logger.withTag("FileConverter")
+
+    // 输出文件名去重集合：避免每写一个文件都做一次全目录 SAF 列表查询（O(n²)）
+    private val knownOutputNames: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val outputNamesSeedMutex = Mutex()
+
+    @Volatile
+    private var outputNamesSeeded = false
+
+    /**
+     * 解析输出文件：首次调用时做一次全目录列举填充集合，之后纯内存查重；
+     * 只有重名（理论上扫描已过滤）才回退到 findFile 精确查询。
+     */
+    private suspend fun resolveOutputFile(fileName: String): DocumentFile? {
+        if (!outputNamesSeeded) {
+            outputNamesSeedMutex.withLock {
+                if (!outputNamesSeeded) {
+                    FastScanner.listFileNames(context, outputDir.uri).forEach { knownOutputNames.add(it) }
+                    outputNamesSeeded = true
+                }
+            }
+        }
+
+        if (knownOutputNames.contains(fileName)) {
+            return outputDir.findFile(fileName)
+        }
+        return outputDir.createFile("audio/*", fileName)?.also { knownOutputNames.add(fileName) }
+    }
 
     suspend fun processFile(uiFile: UiFile): ConversionResult = withContext(Dispatchers.IO) {
         val fileName = uiFile.fileName
@@ -101,7 +132,8 @@ class FileConverter(
             }
 
             // Fetch richer metadata after native decryption has validated the input.
-            val apiMetadata = fetchMetadata(baseName, fetchCover = true, fetchLyrics = true)
+            // 歌词无法内嵌于 NCM，必须始终请求；封面在内嵌时直接复用，省一次下载。
+            val apiMetadata = fetchMetadata(baseName, fetchCover = ncmInfo.cover == null, fetchLyrics = true)
             val finalMetadata = mergeMetadata(ncmInfo, apiMetadata, baseName)
 
             val ext = ncmInfo.format
@@ -136,7 +168,8 @@ class FileConverter(
         logger.i("--- Enhancing metadata/lyrics for: $originalName ---")
 
         return try {
-            val analysis = AudioMetadataProcessor.analyzeMetadataAsync(inputStream, originalName, cacheDir)
+            // 只读头部判断已有标签，避免把整个音频文件拷贝到缓存再分析
+            val analysis = AudioMetadataProcessor.analyzeMetadataLightweight(inputStream, originalName, cacheDir)
             val needs = RegularAudioNeeds(
                 needTitle = analysis.existingTags.title.isBlank(),
                 needArtist = analysis.existingTags.artist.isBlank(),
@@ -267,6 +300,10 @@ class FileConverter(
 
     private fun mergeMetadata(ncmInfo: NcmInfo, apiMetadata: ExtendedMusicMetadata?, fallbackTitle: String): ExtendedMusicMetadata {
         if (apiMetadata != null) {
+            // 封面下载被跳过或失败时回退 NCM 内嵌封面
+            if (apiMetadata.coverData == null && ncmInfo.cover != null) {
+                return apiMetadata.copy(coverData = ncmInfo.cover)
+            }
             return apiMetadata
         }
         // Fallback to NCM info
@@ -286,14 +323,14 @@ class FileConverter(
         )
     }
 
-    private fun writeOutput(
+    private suspend fun writeOutput(
         fileName: String,
         sourceFile: File,
         metadata: MusicMetadata,
         lyrics: String? = null,
         coverData: ByteArray? = null
     ): ConversionResult {
-        val outputFile = outputDir.findFile(fileName) ?: outputDir.createFile("audio/*", fileName)
+        val outputFile = resolveOutputFile(fileName)
             ?: return ConversionResult.Failure(Exception("Could not create output file: $fileName"))
 
         return try {
