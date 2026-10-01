@@ -117,6 +117,10 @@ android {
         compose = true
         viewBinding = true
     }
+    lint {
+        // lintVital stalls indefinitely on CI release builds; run lint explicitly when needed
+        checkReleaseBuilds = false
+    }
 
     sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("generated/rust/jniLibs"))
 }
