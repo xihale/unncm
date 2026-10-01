@@ -92,11 +92,17 @@ jobs:
 
       - name: Setup Rust core toolchain
         if: steps.precheck.outputs.should_build == 'true'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.94.1
         with:
-          toolchain: 1.94.1
           components: rustfmt, clippy
           targets: armv7-linux-androideabi,aarch64-linux-android
+
+      - name: Cache Rust core build
+        if: steps.precheck.outputs.should_build == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          cache-on-failure: "true"
 
       - name: Install Android native build tools
         if: steps.precheck.outputs.should_build == 'true'
@@ -105,7 +111,7 @@ jobs:
           export PATH="$(ls -d "${sdkm}"/*/bin | sort -V | tail -n1):${PATH}"
           yes | sdkmanager --licenses > /dev/null
           sdkmanager "ndk;28.2.13676358"
-          cargo install cargo-ndk --version 4.1.2 --locked
+          command -v cargo-ndk >/dev/null 2>&1 || cargo install cargo-ndk --version 4.1.2 --locked
 
       - name: Test Rust core
         if: steps.precheck.outputs.should_build == 'true'
