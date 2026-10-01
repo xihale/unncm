@@ -29,8 +29,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,7 +37,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import top.xihale.unncm.ConversionUiState
 import top.xihale.unncm.UiFile
@@ -53,7 +50,6 @@ fun MainScreen(
     pendingFiles: List<UiFile>,
     conversionStatus: ConversionUiState,
     folderName: String?,
-    outputPath: String?,
     threads: Int,
     onThreadsChange: (Int) -> Unit,
     onPickFiles: () -> Unit,
@@ -69,21 +65,6 @@ fun MainScreen(
     val isScanning = conversionStatus is ConversionUiState.Scanning
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "unNCM",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                )
-            )
-        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
@@ -101,7 +82,6 @@ fun MainScreen(
                 HeroStage(
                     selectedCount = pendingFiles.size,
                     folderName = folderName,
-                    outputPath = outputPath,
                     onPickFiles = onPickFiles,
                     onPickFolder = onPickFolder,
                     modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)

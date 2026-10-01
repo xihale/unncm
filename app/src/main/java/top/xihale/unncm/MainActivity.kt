@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,15 +54,31 @@ class MainActivity : ComponentActivity() {
         private const val KEY_PENDING_FILES_JSON = "pending_files_json"
         private const val KEY_THREADS = "threads"
         private const val DEFAULT_THREADS = 4
+
+        /** 打开文件夹选择器时的默认定位目录（/storage/emulated/0/Download/netease/cloudmusic/Music）。 */
+        private const val DEFAULT_PICK_DIR_AUTHORITY = "com.android.externalstorage.documents"
+        private const val DEFAULT_PICK_DIR_DOC_ID = "primary:Download/netease/cloudmusic/Music"
     }
 
     private val logger = Logger.withTag("MainActivity")
     private val viewModel: MainViewModel by viewModels()
 
-    private var sourceMode: SourceMode = SourceMode.NONE
+    // 组合期可读取的响应式状态，恢复/选择完成后 UI 自动刷新
+    private var sourceMode by mutableStateOf(SourceMode.NONE)
+
     private var isRestoringState: Boolean = false
     private var persistPendingFilesJob: Job? = null
     private val ncmPickerMimeTypes = arrayOf("application/octet-stream")
+
+    /**
+     * EXTRA_INITIAL_URI 提示：DocumentsUI 支持时直接定位到网易云下载目录，
+     * 目录不存在或选择器不支持时自动回退到默认位置。
+     */
+    private val defaultPickDirHint: Uri? by lazy {
+        runCatching {
+            DocumentsContract.buildDocumentUri(DEFAULT_PICK_DIR_AUTHORITY, DEFAULT_PICK_DIR_DOC_ID)
+        }.getOrNull()
+    }
 
     private val openDocumentTreeLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
@@ -70,10 +87,10 @@ class MainActivity : ComponentActivity() {
 
             lifecycleScope.launch {
                 try {
-                    val (permissionGranted, inputDir) = withContext(Dispatchers.IO) {
+                    val (permissionGranted, inputDir, dirName) = withContext(Dispatchers.IO) {
                         val granted = tryPersistTreeReadWritePermission(uri)
                         val directory = if (granted) DocumentFile.fromTreeUri(this@MainActivity, uri) else null
-                        granted to directory
+                        Triple(granted, directory, directory?.name)
                     }
 
                     if (!permissionGranted || inputDir == null) {
@@ -84,7 +101,7 @@ class MainActivity : ComponentActivity() {
                     persistSourceMode(sourceMode)
                     persistFolderSelection(uri)
                     viewModel.setOutputDir(null)
-                    viewModel.setInputDir(inputDir)
+                    viewModel.setInputDir(inputDir, dirName)
                     viewModel.scanFiles()
                 } catch (e: Exception) {
                     logger.e("Error handling folder selection", e)
@@ -108,7 +125,7 @@ class MainActivity : ComponentActivity() {
                 sourceMode = SourceMode.FILES
                 persistSourceMode(sourceMode)
                 viewModel.setInputDir(null)
-                viewModel.setOutputDir(outputDir)
+                viewModel.setOutputDir(outputDir, outputDir.name)
                 viewModel.setPendingFiles(selectedFiles)
                 viewModel.resetConversionStatus()
                 persistPendingFileSelectionAsync(selectedFiles)
@@ -140,14 +157,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 会话恢复涉及逐 URI 的 SAF 查询（exists/name），必须放在后台线程，
+        // 否则应用启动即卡主线程。isRestoringState 保持 true 直到恢复结束，
+        // 防止中途 onStop 用空列表覆盖持久化的文件选择。
         isRestoringState = true
-        val restored = restoreSessionState()
-        isRestoringState = false
-        if (restored) {
-            if (sourceMode == SourceMode.FOLDER && viewModel.pendingFiles.value.isEmpty()) {
-                viewModel.scanFiles()
-            } else if (sourceMode == SourceMode.FOLDER) {
-                clearPersistedPendingFileSelection()
+        lifecycleScope.launch {
+            val restored = withContext(Dispatchers.IO) { restoreSessionState() }
+            isRestoringState = false
+            if (restored) {
+                if (sourceMode == SourceMode.FOLDER && viewModel.pendingFiles.value.isEmpty()) {
+                    viewModel.scanFiles()
+                } else if (sourceMode == SourceMode.FOLDER) {
+                    clearPersistedPendingFileSelection()
+                }
             }
         }
 
@@ -158,8 +180,7 @@ class MainActivity : ComponentActivity() {
             UnNcmTheme {
                 val pendingFiles by viewModel.pendingFiles.collectAsStateWithLifecycle()
                 val conversionStatus by viewModel.conversionStatus.collectAsStateWithLifecycle()
-                val inputDir by viewModel.inputDir.collectAsStateWithLifecycle()
-                val outputDir by viewModel.outputDir.collectAsStateWithLifecycle()
+                val inputDirName by viewModel.inputDirName.collectAsStateWithLifecycle()
 
                 var threads by remember { mutableIntStateOf(initialThreads) }
                 val snackbarHostState = remember { SnackbarHostState() }
@@ -171,19 +192,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 名称均为后台线程预取的缓存值，组合期零 binder 查询
                 val folderName = when (sourceMode) {
-                    SourceMode.FOLDER -> inputDir?.name ?: "已选文件夹"
+                    SourceMode.FOLDER -> inputDirName ?: "已选文件夹"
                     SourceMode.FILES -> if (pendingFiles.isNotEmpty()) "直接选取 ${pendingFiles.size} 个文件" else null
                     SourceMode.NONE -> null
                 }
-
-                val outputPath = outputDir?.name ?: inputDir?.let { "${it.name}/unlocked" } ?: "unlocked"
 
                 MainScreen(
                     pendingFiles = pendingFiles,
                     conversionStatus = conversionStatus,
                     folderName = folderName,
-                    outputPath = outputPath,
                     threads = threads,
                     onThreadsChange = { count ->
                         threads = count
@@ -193,7 +212,7 @@ class MainActivity : ComponentActivity() {
                         openMultipleFilesLauncher.launch(ncmPickerMimeTypes)
                     },
                     onPickFolder = {
-                        openDocumentTreeLauncher.launch(null)
+                        openDocumentTreeLauncher.launch(defaultPickDirHint)
                     },
                     onRemoveFile = { file ->
                         viewModel.removePendingFile(file)
@@ -284,7 +303,7 @@ class MainActivity : ComponentActivity() {
         sourceMode = SourceMode.FILES
         persistSourceMode(sourceMode)
         viewModel.setInputDir(null)
-        viewModel.setOutputDir(outputDir)
+        viewModel.setOutputDir(outputDir, outputDir.name)
         viewModel.setPendingFiles(restoredFiles)
         viewModel.resetConversionStatus()
         persistPendingFileSelectionAsync(restoredFiles)
@@ -310,7 +329,7 @@ class MainActivity : ComponentActivity() {
                 DocumentFile.fromTreeUri(this, uri)?.takeIf { it.exists() }?.let { docFile ->
                     sourceMode = SourceMode.FOLDER
                     persistSourceMode(sourceMode)
-                    viewModel.setInputDir(docFile)
+                    viewModel.setInputDir(docFile, docFile.name)
                     return true
                 }
 

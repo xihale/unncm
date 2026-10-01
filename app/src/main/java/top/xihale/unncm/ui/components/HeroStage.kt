@@ -86,47 +86,29 @@ private class SlashSideShape(private val isLeft: Boolean) : Shape {
 fun HeroStage(
     selectedCount: Int,
     folderName: String?,
-    outputPath: String?,
     onPickFiles: () -> Unit,
     onPickFolder: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(if (selectedCount == 0 && folderName == null) 160.dp else 96.dp)
+            .animateContentSize(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (selectedCount == 0 && folderName == null) 160.dp else 96.dp)
-                .animateContentSize(),
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer
-        ) {
-            if (selectedCount == 0 && folderName == null) {
-                EmptyStage(
-                    onPickFiles = onPickFiles,
-                    onPickFolder = onPickFolder
-                )
-            } else {
-                PopulatedStage(
-                    selectedCount = selectedCount,
-                    folderName = folderName,
-                    onPickFiles = onPickFiles,
-                    onPickFolder = onPickFolder
-                )
-            }
-        }
-
-        // 极简输出目录指引：安静退后，单行浅色显示
-        if (!outputPath.isNullOrBlank()) {
-            Text(
-                text = "输出: $outputPath",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 4.dp)
+        if (selectedCount == 0 && folderName == null) {
+            EmptyStage(
+                onPickFiles = onPickFiles,
+                onPickFolder = onPickFolder
+            )
+        } else {
+            PopulatedStage(
+                selectedCount = selectedCount,
+                folderName = folderName,
+                onPickFiles = onPickFiles,
+                onPickFolder = onPickFolder
             )
         }
     }
